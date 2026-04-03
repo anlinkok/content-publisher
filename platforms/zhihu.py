@@ -6,9 +6,16 @@ import asyncio
 import json
 import logging
 import os
+import sys
 from pathlib import Path
 from platforms.base import PlatformTool, ToolResult
 
+# 强制启用日志
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[logging.StreamHandler(sys.stdout)]
+)
 logger = logging.getLogger(__name__)
 
 COOKIE_DIR = Path("data/cookies")
@@ -90,97 +97,169 @@ class ZhihuTool(PlatformTool):
             if not original_file or not os.path.exists(original_file):
                 return ToolResult(success=False, error=f"找不到原始文件: {original_file}")
             
-            logger.info("进入知乎创作页面...")
+            print("[INFO] 进入知乎创作页面...")
             await self.page.goto("https://zhuanlan.zhihu.com/write")
             await self.page.wait_for_load_state("networkidle")
             await asyncio.sleep(3)
             
-            # 上传文件
-            logger.info("上传文件...")
+            # 第1步：找到文件上传input
+            print("[INFO] 查找文件上传input...")
             file_inputs = await self.page.query_selector_all('input[type="file"]')
-            target_input = None
+            print(f"[INFO] 找到 {len(file_inputs)} 个文件input")
             
-            for inp in file_inputs:
+            target_input = None
+            for i, inp in enumerate(file_inputs):
                 accept = await inp.get_attribute('accept')
+                print(f"[INFO] input {i}: accept={accept}")
                 if accept and '.docx' in accept:
                     target_input = inp
+                    print(f"[INFO] 找到目标input")
                     break
             
             if not target_input:
+                print("[WARNING] 没找到.docx input，使用第一个")
                 target_input = await self.page.wait_for_selector('input[type="file"]', timeout=10000)
             
+            # 第2步：上传文件
+            print(f"[INFO] 上传文件: {original_file}")
             await target_input.set_input_files(original_file)
-            logger.info("文件已上传")
+            print("[INFO] 文件已设置到input")
             
-            # 等待弹窗
+            # 第3步：等待弹窗出现
+            print("[INFO] 等待5秒让弹窗出现...")
             await asyncio.sleep(5)
             
-            # 调试：打印所有按钮文字
-            logger.info("=== 调试：查找所有按钮 ===")
-            buttons = await self.page.query_selector_all('button')
-            for i, btn in enumerate(buttons):
-                text = await btn.text_content()
-                visible = await btn.is_visible()
-                logger.info(f"按钮 {i}: text='{text}', visible={visible}")
+            # 第4步：检查弹窗是否存在
+            print("[INFO] 检查弹窗...")
+            try:
+                modal = await self.page.query_selector('.Modal, [role="dialog"], .dialog')
+                if modal:
+                    print("[INFO] 找到弹窗元素")
+                    modal_html = await modal.inner_html()
+                    print(f"[DEBUG] 弹窗HTML前500字符: {modal_html[:500]}")
+                else:
+                    print("[WARNING] 没找到弹窗元素")
+            except Exception as e:
+                print(f"[ERROR] 检查弹窗失败: {e}")
             
-            # 尝试多种方式点击确认
+            # 第5步：点击文件名
             file_name = os.path.basename(original_file)
-            logger.info(f"点击文件: {file_name}")
-            
-            # 点击文件名
+            print(f"[INFO] 尝试点击文件名: {file_name}")
             try:
                 file_row = await self.page.wait_for_selector(f'text={file_name}', timeout=10000)
                 await file_row.click()
-                logger.info("已点击文件")
+                print("[INFO] 已点击文件名")
             except Exception as e:
-                logger.warning(f"点击文件失败: {e}")
+                print(f"[ERROR] 点击文件名失败: {e}")
+                return ToolResult(success=False, error=f"点击文件名失败: {e}")
             
             await asyncio.sleep(3)
             
-            # 尝试点击任何包含"选择"或"确认"的按钮
-            logger.info("尝试点击确认按钮...")
-            try:
-                # 方法1：模糊匹配
-                confirm_btn = await self.page.wait_for_selector('button:has-text("选择")', timeout=5000)
-                await confirm_btn.click(force=True)
-                logger.info("已点击按钮（包含'选择'）")
-            except:
+            # 第6步：找确认按钮
+            print("[INFO] 查找确认按钮...")
+            buttons = await self.page.query_selector_all('button')
+            print(f"[INFO] 页面上共有 {len(buttons)} 个button")
+            
+            for i, btn in enumerate(buttons):
                 try:
-                    # 方法2：找弹窗内的最后一个按钮
-                    modal_buttons = await self.page.query_selector_all('.Modal button, [role="dialog"] button, .dialog button')
-                    if modal_buttons:
-                        await modal_buttons[-1].click(force=True)
-                        logger.info("已点击弹窗内最后一个按钮")
-                except Exception as e2:
-                    logger.error(f"点击确认按钮失败: {e2}")
-                    return ToolResult(success=False, error=f"无法点击确认按钮: {e2}")
+                    text = await btn.text_content()
+                    visible = await btn.is_visible()
+                    enabled = await btn.is_enabled()
+                    print(f"[INFO] 按钮 {i}: text='{text}', visible={visible}, enabled={enabled}")
+                except:
+                    print(f"[INFO] 按钮 {i}: 无法获取信息")
             
-            # 等待导入
-            await asyncio.sleep(10)
+            # 第7步：尝试点击确认按钮
+            confirm_clicked = False
             
-            # 发布
-            logger.info("点击发布...")
-            publish_btn = await self.page.wait_for_selector('button:has-text("发布")', timeout=10000)
-            await publish_btn.click()
+            # 尝试各种选择器
+            selectors = [
+                'button:has-text("请选择文件")',
+                'button:has-text("选择")',
+                'button:has-text("确认")',
+                'button:has-text("确定")',
+                '.Modal button:last-child',
+                '[role="dialog"] button:last-child'
+            ]
+            
+            for selector in selectors:
+                try:
+                    print(f"[INFO] 尝试选择器: {selector}")
+                    btn = await self.page.wait_for_selector(selector, timeout=3000)
+                    await btn.click(force=True)
+                    print(f"[INFO] 成功点击: {selector}")
+                    confirm_clicked = True
+                    break
+                except Exception as e:
+                    print(f"[INFO] 选择器 {selector} 失败: {e}")
+                    continue
+            
+            if not confirm_clicked:
+                print("[ERROR] 所有选择器都失败，无法点击确认按钮")
+                return ToolResult(success=False, error="无法点击确认按钮")
+            
+            # 第8步：等待导入完成
+            print("[INFO] 等待15秒让文档导入完成...")
+            await asyncio.sleep(15)
+            
+            # 第9步：检查编辑器是否有内容
+            print("[INFO] 检查编辑器内容...")
+            try:
+                title_input = await self.page.query_selector('textarea[placeholder*="标题"], input[placeholder*="标题"]')
+                if title_input:
+                    title_value = await title_input.input_value()
+                    print(f"[INFO] 编辑器标题: {title_value}")
+                    if not title_value:
+                        print("[WARNING] 标题为空，可能导入失败")
+                        return ToolResult(success=False, error="文档导入后标题为空")
+                else:
+                    print("[WARNING] 没找到标题输入框")
+            except Exception as e:
+                print(f"[ERROR] 检查编辑器失败: {e}")
+            
+            # 第10步：发布
+            print("[INFO] 点击发布按钮...")
+            try:
+                publish_btn = await self.page.wait_for_selector('button:has-text("发布")', timeout=10000)
+                await publish_btn.click()
+                print("[INFO] 已点击发布")
+            except Exception as e:
+                print(f"[ERROR] 点击发布按钮失败: {e}")
+                return ToolResult(success=False, error=f"点击发布按钮失败: {e}")
+            
             await asyncio.sleep(3)
             
+            # 确认弹窗
             try:
                 publish_buttons = await self.page.query_selector_all('button:has-text("发布")')
                 if len(publish_buttons) >= 2:
                     await publish_buttons[-1].click()
+                    print("[INFO] 已点击确认发布")
             except:
                 pass
             
-            await asyncio.sleep(5)
+            # 等待跳转
+            print("[INFO] 等待页面跳转到文章链接...")
+            try:
+                await self.page.wait_for_url("**/p/**", timeout=30000)
+                print("[INFO] 页面已跳转")
+            except:
+                print("[WARNING] 等待跳转超时")
+            
+            await asyncio.sleep(3)
             current_url = self.page.url
+            print(f"[INFO] 当前URL: {current_url}")
             
             if "/p/" in current_url:
                 post_id = current_url.split("/p/")[1].split("?")[0]
+                print(f"[INFO] 发布成功，文章ID: {post_id}")
                 return ToolResult(success=True, post_id=post_id, post_url=current_url)
-            return ToolResult(success=True, post_url=current_url)
+            else:
+                print("[WARNING] URL不包含/p/，可能发布未成功")
+                return ToolResult(success=False, error="发布未完成，页面未跳转到文章")
             
         except Exception as e:
-            logger.exception("知乎发布失败")
+            print(f"[ERROR] 知乎发布失败: {e}")
             return ToolResult(success=False, error=str(e))
     
     async def check_status(self, post_id: str) -> ToolResult:
