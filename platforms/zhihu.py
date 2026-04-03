@@ -1,5 +1,6 @@
 """
 知乎平台实现 - 使用文档导入功能
+直接操作 file input，跳过按钮点击
 """
 
 import asyncio
@@ -130,70 +131,37 @@ class ZhihuTool(PlatformTool):
             log("等待弹窗加载...")
             await asyncio.sleep(5)
             
-            # 第4步：点击"点击选择本地文档或拖动文件到窗口上传"按钮
-            # 根据录制代码，按钮文字是"点击选择本地文档或拖动文件到窗口上传"
-            log("点击上传按钮...")
+            # 第4步：不点击按钮，直接找 file input 并上传
+            # 按钮点击没反应，直接操作 input
+            log("直接查找 file input 并上传...")
+            
+            # 方法1：在弹窗内查找
             try:
-                # 方法1：用 get_by_role 精确匹配（录制代码用的方式）
-                await self.page.get_by_role(
-                    "button", 
-                    name="点击选择本地文档或拖动文件到窗口上传"
-                ).click()
-                log("已点击上传按钮（方法1）")
+                file_input = await self.page.query_selector(
+                    '.Modal input[type="file"], [role="dialog"] input[type="file"]'
+                )
+                if file_input:
+                    log("在弹窗内找到 file input")
+                    await file_input.set_input_files(original_file)
+                    log("文件已上传（弹窗内）")
+                else:
+                    raise Exception("弹窗内没找到")
             except Exception as e:
                 log(f"方法1失败: {e}")
-                try:
-                    # 方法2：用部分文字匹配
-                    await self.page.click(
-                        'button:has-text("点击选择本地文档")',
-                        timeout=10000
-                    )
-                    log("已点击上传按钮（方法2）")
-                except Exception as e2:
-                    log(f"方法2失败: {e2}")
-                    try:
-                        # 方法3：在弹窗内查找任何可点击的按钮（除了关闭按钮）
-                        buttons = await self.page.query_selector_all('.Modal button, [role="dialog"] button')
-                        for btn in buttons:
-                            text = await btn.text_content()
-                            if text and "选择" in text and "关闭" not in text:
-                                await btn.click()
-                                log(f"已点击按钮: {text}")
-                                break
-                    except Exception as e3:
-                        log(f"方法3也失败: {e3}")
-                        return ToolResult(success=False, error="无法点击上传按钮")
-            
-            # 第5步：等待文件选择对话框或 file input 出现
-            log("等待文件选择...")
-            await asyncio.sleep(3)
-            
-            # 第6步：上传文件
-            log(f"上传文件: {original_file}")
-            try:
-                # 查找弹窗内的 file input
-                file_input = await self.page.wait_for_selector(
-                    '.Modal input[type="file"], [role="dialog"] input[type="file"]',
-                    timeout=10000,
-                    state='attached'  # 只要元素存在就行，不需要可见
-                )
-                await file_input.set_input_files(original_file)
-                log("文件已上传")
-            except Exception as e:
-                log(f"弹窗内查找失败: {e}")
-                # 备用：全局查找所有 file input
+                # 方法2：全局查找所有，选最后一个
                 try:
                     file_inputs = await self.page.query_selector_all('input[type="file"]')
+                    log(f"全局找到 {len(file_inputs)} 个 file input")
                     if len(file_inputs) > 0:
-                        await file_inputs[-1].set_input_files(original_file)  # 用最后一个（通常是弹窗里的）
-                        log("文件已上传（备用）")
+                        await file_inputs[-1].set_input_files(original_file)
+                        log("文件已上传（全局最后一个）")
                     else:
                         return ToolResult(success=False, error="找不到文件上传框")
                 except Exception as e2:
-                    log(f"备用也失败: {e2}")
+                    log(f"方法2也失败: {e2}")
                     return ToolResult(success=False, error=f"上传文件失败: {e2}")
             
-            # 第7步：等待导入完成
+            # 第5步：等待导入完成
             log("等待导入完成，最多2分钟...")
             try:
                 await self.page.wait_for_url("**/p/**/edit", timeout=120000)
@@ -204,7 +172,7 @@ class ZhihuTool(PlatformTool):
                 if "/p/" not in current_url:
                     return ToolResult(success=False, error="文档导入超时")
             
-            # 第8步：发布
+            # 第6步：发布
             current_url = self.page.url
             post_id = current_url.split("/p/")[1].split("/")[0]
             log(f"文章ID: {post_id}")
@@ -234,7 +202,7 @@ class ZhihuTool(PlatformTool):
             except:
                 log("没有确认弹窗")
             
-            # 第9步：等待完成
+            # 第7步：等待完成
             log("等待发布完成...")
             try:
                 await self.page.wait_for_url("**/p/**", timeout=60000)
