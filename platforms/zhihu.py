@@ -95,8 +95,8 @@ class ZhihuTool(PlatformTool):
             await self.page.wait_for_load_state("networkidle")
             await asyncio.sleep(3)
             
-            # 第1步：找到文件上传input并上传文件（后台上传）
-            logger.info("上传文件到知乎...")
+            # 上传文件
+            logger.info("上传文件...")
             file_inputs = await self.page.query_selector_all('input[type="file"]')
             target_input = None
             
@@ -110,50 +110,60 @@ class ZhihuTool(PlatformTool):
                 target_input = await self.page.wait_for_selector('input[type="file"]', timeout=10000)
             
             await target_input.set_input_files(original_file)
-            logger.info("文件已上传，等待处理...")
+            logger.info("文件已上传")
             
-            # 第2步：等待文件列表弹窗出现
+            # 等待弹窗
             await asyncio.sleep(5)
             
-            # 第3步：在弹窗中选择文件
+            # 调试：打印所有按钮文字
+            logger.info("=== 调试：查找所有按钮 ===")
+            buttons = await self.page.query_selector_all('button')
+            for i, btn in enumerate(buttons):
+                text = await btn.text_content()
+                visible = await btn.is_visible()
+                logger.info(f"按钮 {i}: text='{text}', visible={visible}")
+            
+            # 尝试多种方式点击确认
+            file_name = os.path.basename(original_file)
+            logger.info(f"点击文件: {file_name}")
+            
+            # 点击文件名
             try:
-                file_name = os.path.basename(original_file)
-                logger.info(f"在弹窗中查找文件: {file_name}")
-                
-                # 等待弹窗出现（检查"选择文件"标题）
-                await self.page.wait_for_selector('text=选择文件', timeout=10000)
-                logger.info("文件选择弹窗已出现")
-                
-                # 点击文件名所在行
-                file_row = await self.page.wait_for_selector(
-                    f'text={file_name}',
-                    timeout=10000
-                )
+                file_row = await self.page.wait_for_selector(f'text={file_name}', timeout=10000)
                 await file_row.click()
                 logger.info("已点击文件")
-                await asyncio.sleep(2)
-                
-                # 点击"请选择文件"按钮
-                confirm_btn = await self.page.wait_for_selector(
-                    'button:has-text("请选择文件")',
-                    timeout=10000
-                )
-                await confirm_btn.click()
-                logger.info("已点击请选择文件按钮")
-                
-                # 等待导入完成
-                await asyncio.sleep(10)
             except Exception as e:
-                logger.error(f"选择文件失败: {e}")
-                return ToolResult(success=False, error=f"选择文件失败: {e}")
+                logger.warning(f"点击文件失败: {e}")
             
-            # 第4步：发布
-            logger.info("点击发布按钮...")
+            await asyncio.sleep(3)
+            
+            # 尝试点击任何包含"选择"或"确认"的按钮
+            logger.info("尝试点击确认按钮...")
+            try:
+                # 方法1：模糊匹配
+                confirm_btn = await self.page.wait_for_selector('button:has-text("选择")', timeout=5000)
+                await confirm_btn.click(force=True)
+                logger.info("已点击按钮（包含'选择'）")
+            except:
+                try:
+                    # 方法2：找弹窗内的最后一个按钮
+                    modal_buttons = await self.page.query_selector_all('.Modal button, [role="dialog"] button, .dialog button')
+                    if modal_buttons:
+                        await modal_buttons[-1].click(force=True)
+                        logger.info("已点击弹窗内最后一个按钮")
+                except Exception as e2:
+                    logger.error(f"点击确认按钮失败: {e2}")
+                    return ToolResult(success=False, error=f"无法点击确认按钮: {e2}")
+            
+            # 等待导入
+            await asyncio.sleep(10)
+            
+            # 发布
+            logger.info("点击发布...")
             publish_btn = await self.page.wait_for_selector('button:has-text("发布")', timeout=10000)
             await publish_btn.click()
             await asyncio.sleep(3)
             
-            # 确认弹窗
             try:
                 publish_buttons = await self.page.query_selector_all('button:has-text("发布")')
                 if len(publish_buttons) >= 2:
