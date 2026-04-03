@@ -187,6 +187,35 @@ class BaijiahaoTool(PlatformTool):
             
             await asyncio.sleep(8)  # 等待导入
             
+            # 填写标题（从文章提取）
+            title = article.title if hasattr(article, 'title') and article.title else ""
+            if title:
+                log(f"填写标题: {title}")
+                try:
+                    # 等待标题输入框出现并填写
+                    title_input = await self.page.wait_for_selector('input[placeholder*="标题"], input[placeholder*="文章标题"], [contenteditable="true"]', timeout=10000)
+                    await title_input.fill(title)
+                    log("标题已填写")
+                except Exception as e:
+                    log(f"填写标题失败: {e}")
+                    # 备用：尝试JS填写
+                    try:
+                        await self.page.evaluate(f"""
+                            const inputs = document.querySelectorAll('input[placeholder*="标题"], input[placeholder*="文章标题"], [contenteditable="true"]');
+                            for (const input of inputs) {{
+                                if (input.offsetParent !== null) {{  // 可见元素
+                                    input.value = "{title}";
+                                    input.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                                    input.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                                    break;
+                                }}
+                            }}
+                        """)
+                        log("标题已通过JS填写")
+                    except Exception as e2:
+                        log(f"JS填写标题也失败: {e2}")
+                await asyncio.sleep(1)
+            
             # 全部采纳
             log("点击'全部采纳'...")
             try:
