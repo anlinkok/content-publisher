@@ -132,118 +132,93 @@ class ZhihuTool(PlatformTool):
             log("等待弹窗出现...")
             await self.page.wait_for_selector('.Modal', timeout=15000)
             log("弹窗已出现")
+            await asyncio.sleep(5)
             
-            # 等待弹窗加载
-            await asyncio.sleep(10)
-            
-            # ===== 抓取弹窗HTML保存 =====
-            log("抓取弹窗HTML...")
-            try:
-                modal = await self.page.query_selector('.Modal')
-                if modal:
-                    modal_html = await modal.inner_html()
-                    # 保存到文件
-                    with open("zhihu_modal.html", "w", encoding="utf-8") as f:
-                        f.write(modal_html)
-                    log("弹窗HTML已保存到 zhihu_modal.html")
-                    # 同时记录到日志（前2000字符）
-                    log(f"弹窗HTML预览:\n{modal_html[:2000]}")
-            except Exception as e:
-                log(f"抓取弹窗HTML失败: {e}")
-            
-            # 第4步：点击文件前面的圆圈
+            # 第4步：点击文件行来选中它（这样按钮才会变成可用）
             file_name = os.path.basename(original_file)
-            log(f"尝试选中文件: {file_name}")
+            log(f"点击文件行来选中: {file_name}")
             
             try:
-                file_row = self.page.locator('.Modal').locator(f'text={file_name}')
-                box = await file_row.bounding_box()
-                if box:
-                    await self.page.mouse.click(box['x'] + 20, box['y'] + box['height']/2)
-                    log("已点击文件左侧圆圈")
-                else:
-                    await file_row.click()
-                    log("已点击文件名")
+                # 找到包含文件名的行并点击
+                file_row = await self.page.wait_for_selector(
+                    f'.Modal :has-text("{file_name}")',
+                    timeout=10000
+                )
+                await file_row.click()
+                log("已点击文件行")
             except Exception as e:
-                log(f"点击文件失败: {e}")
-                return ToolResult(success=False, error=f"点击文件失败: {e}")
+                log(f"点击文件行失败: {e}")
+                # 备用：点击文件左侧区域
+                try:
+                    file_locator = self.page.locator('.Modal').locator(f'text={file_name}')
+                    box = await file_locator.bounding_box()
+                    if box:
+                        await self.page.mouse.click(box['x'] - 30, box['y'] + box['height']/2)
+                        log("已点击文件左侧圆圈区域")
+                except Exception as e2:
+                    log(f"备用点击也失败: {e2}")
             
             await asyncio.sleep(3)
             
-            # 第5步：从抓取的HTML中分析按钮
-            log("从HTML分析按钮...")
-            try:
-                # 读取保存的HTML分析按钮
-                with open("zhihu_modal.html", "r", encoding="utf-8") as f:
-                    html_content = f.read()
-                
-                # 查找所有按钮
-                import re
-                buttons = re.findall(r'<button[^\u003e]*>([^\u003c]*)</button>', html_content)
-                log(f"HTML中找到 {len(buttons)} 个按钮文字: {buttons}")
-                
-                # 查找包含特定文字的按钮索引
-                for i, text in enumerate(buttons):
-                    if "选择" in text or "确认" in text:
-                        log(f"找到目标按钮索引: {i}, 文字: '{text}'")
-            except Exception as e:
-                log(f"分析HTML失败: {e}")
+            # 第5步：等待"请选择文件"按钮变成可用状态，然后点击
+            log("等待'请选择文件'按钮变成可用...")
             
-            # 第6步：等待按钮文字加载并点击
-            log("等待按钮加载...")
-            target_btn = None
-            
-            for attempt in range(20):
-                modal = await self.page.query_selector('.Modal')
-                if modal:
-                    all_buttons = await modal.query_selector_all('button')
-                    for i, btn in enumerate(all_buttons):
-                        try:
-                            text = await btn.text_content()
-                            if text and ("请选择文件" in text or "选择文件" in text):
-                                target_btn = btn
-                                log(f"找到按钮: {text}")
-                                break
-                        except:
-                            pass
-                    if target_btn:
+            confirm_btn = None
+            for attempt in range(30):  # 最多等待30秒
+                try:
+                    # 查找包含"请选择文件"文字的div，且不是禁用状态
+                    btn = await self.page.query_selector(
+                        '.Modal div:has-text("请选择文件")[aria-disabled="false"], '
+                        '.Modal div:has-text("请选择文件"):not([aria-disabled="true"])'
+                    )
+                    if btn:
+                        log(f"找到可用的'请选择文件'按钮")
+                        confirm_btn = btn
                         break
+                    else:
+                        log(f"第{attempt+1}秒: 按钮还未可用...")
+                except Exception as e:
+                    log(f"第{attempt+1}秒: 检查失败 {e}")
+                
                 await asyncio.sleep(1)
             
-            if target_btn:
+            if not confirm_btn:
+                log("30秒内按钮未变成可用状态，尝试直接找文字")
+                # 备用：直接找包含文字的div
                 try:
-                    await target_btn.click()
-                    log("已点击'请选择文件'按钮")
-                except Exception as e:
-                    log(f"点击失败: {e}")
-                    try:
-                        await target_btn.evaluate('btn => btn.click()')
-                        log("已用JavaScript点击")
-                    except:
-                        return ToolResult(success=False, error="无法点击确认按钮")
-            else:
-                log("没找到按钮，点击最后一个可见按钮")
-                try:
-                    modal = await self.page.query_selector('.Modal')
-                    all_buttons = await modal.query_selector_all('button')
-                    for btn in reversed(all_buttons):
-                        if await btn.is_visible():
-                            await btn.click()
-                            log("已点击最后一个可见按钮")
-                            break
+                    confirm_btn = await self.page.wait_for_selector(
+                        '.Modal div:has-text("请选择文件")',
+                        timeout=5000
+                    )
                 except:
                     pass
             
-            # 第7步：等待导入完成
-            log("等待弹窗消失...")
+            if confirm_btn:
+                try:
+                    await confirm_btn.click()
+                    log("已点击'请选择文件'按钮")
+                except Exception as e:
+                    log(f"点击失败: {e}，尝试JavaScript点击...")
+                    try:
+                        await confirm_btn.evaluate('el => el.click()')
+                        log("已用JavaScript点击按钮")
+                    except Exception as e2:
+                        log(f"JavaScript点击也失败: {e2}")
+                        return ToolResult(success=False, error="无法点击确认按钮")
+            else:
+                log("没找到'请选择文件'按钮")
+                return ToolResult(success=False, error="找不到确认按钮")
+            
+            # 第6步：等待导入完成
+            log("等待弹窗消失（导入完成）...")
             try:
                 await self.page.wait_for_selector('.Modal', state='hidden', timeout=60000)
-                log("弹窗已消失")
+                log("弹窗已消失，导入完成")
             except:
-                log("弹窗未消失，等待30秒")
+                log("弹窗未自动消失，等待30秒后继续")
                 await asyncio.sleep(30)
             
-            # 第8步：检查编辑器
+            # 第7步：检查编辑器是否有内容
             log("检查编辑器内容...")
             try:
                 title_input = await self.page.wait_for_selector(
@@ -253,24 +228,25 @@ class ZhihuTool(PlatformTool):
                 title_value = await title_input.input_value()
                 log(f"编辑器标题: '{title_value}'")
                 if not title_value or not title_value.strip():
-                    log("标题为空，导入失败")
+                    log("标题为空，文档导入失败")
                     return ToolResult(success=False, error="文档导入失败，标题为空")
             except Exception as e:
                 log(f"检查编辑器失败: {e}")
                 return ToolResult(success=False, error=f"检查编辑器失败: {e}")
             
-            # 第9步：发布
-            log("点击发布...")
+            # 第8步：发布
+            log("点击发布按钮...")
             try:
                 publish_btn = await self.page.wait_for_selector('button:has-text("发布")', timeout=10000)
                 await publish_btn.click()
                 log("已点击发布")
             except Exception as e:
-                log(f"点击发布失败: {e}")
+                log(f"点击发布按钮失败: {e}")
                 return ToolResult(success=False, error=f"点击发布按钮失败: {e}")
             
             await asyncio.sleep(3)
             
+            # 确认弹窗
             try:
                 publish_buttons = await self.page.query_selector_all('button:has-text("发布")')
                 if len(publish_buttons) >= 2:
@@ -279,6 +255,7 @@ class ZhihuTool(PlatformTool):
             except:
                 pass
             
+            # 等待跳转
             log("等待页面跳转...")
             try:
                 await self.page.wait_for_url("**/p/**", timeout=60000)
