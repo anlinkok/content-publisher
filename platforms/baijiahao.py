@@ -133,7 +133,11 @@ class BaijiahaoTool(PlatformTool):
                 return ToolResult(success=False, error="找不到原始文件")
             
             log("进入百家号首页...")
-            await self.page.goto("https://baijiahao.baidu.com/builder/rc/home")
+            try:
+                await self.page.goto("https://baijiahao.baidu.com/builder/rc/home", wait_until="domcontentloaded", timeout=60000)
+            except:
+                # 如果超时，继续执行
+                pass
             await asyncio.sleep(3)
             
             # 关闭首页弹窗
