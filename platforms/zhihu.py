@@ -70,8 +70,9 @@ class ZhihuTool(PlatformTool):
             await content_editor.click()
             
             # 输入HTML内容
+            safe_html = article.html_content.replace('`', '\\`')
             await self.page.evaluate(f"""
-                document.querySelector('.DraftEditor-root').innerHTML = `<div class=\"DraftEditor-editorContainer\"><div contenteditable=\"true\" class=\"public-DraftEditor-content\">{article.html_content.replace('`', '\\`')}</div></div>`;
+                document.querySelector('.DraftEditor-root').innerHTML = `<div class=\"DraftEditor-editorContainer\"><div contenteditable=\"true\" class=\"public-DraftEditor-content\">{safe_html}</div></div>`;
             """)
             
             await asyncio.sleep(2)
