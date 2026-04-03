@@ -18,8 +18,8 @@ def log(msg):
         with open("zhihu_debug.log", "a", encoding="utf-8") as f:
             f.write(f"{msg}\n")
             f.flush()
-    except Exception as e:
-        print(f"[LOG ERROR] {e}: {msg}")
+    except:
+        pass
 
 
 class ZhihuTool(PlatformTool):
@@ -128,60 +128,82 @@ class ZhihuTool(PlatformTool):
             await target_input.set_input_files(original_file)
             log("文件已设置到input")
             
-            # 第3步：等待弹窗出现
+            # 第3步：等待弹窗出现并完全加载
             log("等待弹窗出现...")
-            await self.page.wait_for_selector('.Modal, .css-175oi2r', timeout=15000)
+            await self.page.wait_for_selector('.Modal', timeout=15000)
             log("弹窗已出现")
-            await asyncio.sleep(3)
+            
+            # 等待更长时间让按钮加载
+            log("等待5秒让按钮加载...")
+            await asyncio.sleep(5)
             
             # 第4步：在弹窗内点击文件名
             file_name = os.path.basename(original_file)
             log(f"在弹窗内点击文件名: {file_name}")
             try:
-                # 在弹窗内查找文件名
                 file_locator = self.page.locator('.Modal').locator(f'text={file_name}')
                 await file_locator.click()
                 log("已点击文件名")
             except Exception as e:
-                log(f"用locator点击失败: {e}")
-                # 备用方案
-                try:
-                    file_row = await self.page.wait_for_selector(f'.Modal >> text={file_name}', timeout=10000)
-                    await file_row.click()
-                    log("已用备用方案点击文件名")
-                except Exception as e2:
-                    log(f"备用方案也失败: {e2}")
-                    return ToolResult(success=False, error=f"点击文件名失败: {e2}")
+                log(f"点击文件名失败: {e}")
+                return ToolResult(success=False, error=f"点击文件名失败: {e}")
             
             await asyncio.sleep(3)
             
-            # 第5步：在弹窗内找确认按钮并点击
+            # 第5步：在弹窗内找确认按钮（多种方法尝试）
             log("在弹窗内查找确认按钮...")
+            confirm_clicked = False
+            
+            # 方法1：查找包含"请选择文件"的按钮（等待文字加载）
             try:
-                # 方法1：直接在弹窗内查找包含"选择"的按钮
-                modal = await self.page.wait_for_selector('.Modal', timeout=10000)
-                modal_buttons = await modal.query_selector_all('button')
-                log(f"弹窗内有 {len(modal_buttons)} 个button")
-                
-                for i, btn in enumerate(modal_buttons):
-                    try:
-                        text = await btn.text_content()
-                        visible = await btn.is_visible()
-                        log(f"弹窗按钮 {i}: text='{text}', visible={visible}")
-                        if text and ("选择" in text or "确认" in text or "确定" in text):
-                            await btn.click()
-                            log(f"已点击弹窗按钮: {text}")
-                            break
-                    except:
-                        continue
-                else:
-                    # 如果没找到特定文字按钮，点最后一个
-                    if modal_buttons:
-                        await modal_buttons[-1].click()
-                        log("已点击弹窗最后一个按钮")
+                btn = await self.page.wait_for_selector('.Modal button:has-text("请选择文件")', timeout=5000)
+                await btn.click()
+                log("已点击'请选择文件'按钮")
+                confirm_clicked = True
             except Exception as e:
-                log(f"点击确认按钮失败: {e}")
-                return ToolResult(success=False, error=f"点击确认按钮失败: {e}")
+                log(f"方法1失败: {e}")
+            
+            # 方法2：通过CSS类名查找（知乎常用class）
+            if not confirm_clicked:
+                try:
+                    btn = await self.page.wait_for_selector('.Modal button[class*="Button"], .Modal button[class*="css-"]', timeout=5000)
+                    await btn.click()
+                    log("已点击弹窗内的Button类按钮")
+                    confirm_clicked = True
+                except Exception as e:
+                    log(f"方法2失败: {e}")
+            
+            # 方法3：查找所有可见的button，点最后一个（通常是确认）
+            if not confirm_clicked:
+                try:
+                    modal = await self.page.wait_for_selector('.Modal', timeout=10000)
+                    modal_buttons = await modal.query_selector_all('button')
+                    log(f"弹窗内有 {len(modal_buttons)} 个button")
+                    
+                    for i, btn in enumerate(modal_buttons):
+                        try:
+                            text = await btn.text_content()
+                            visible = await btn.is_visible()
+                            log(f"弹窗按钮 {i}: text='{text[:20] if text else ''}', visible={visible}")
+                        except:
+                            pass
+                    
+                    # 点击最后一个可见按钮
+                    for btn in reversed(modal_buttons):
+                        try:
+                            if await btn.is_visible():
+                                await btn.click()
+                                log("已点击弹窗最后一个可见按钮")
+                                confirm_clicked = True
+                                break
+                        except:
+                            continue
+                except Exception as e:
+                    log(f"方法3失败: {e}")
+            
+            if not confirm_clicked:
+                log("所有方法都失败，无法点击确认按钮")
+                return ToolResult(success=False, error="无法点击确认按钮")
             
             # 第6步：等待导入完成（等待弹窗消失）
             log("等待弹窗消失（导入完成）...")
@@ -200,8 +222,8 @@ class ZhihuTool(PlatformTool):
                     timeout=10000
                 )
                 title_value = await title_input.input_value()
-                log(f"编辑器标题: {title_value}")
-                if not title_value:
+                log(f"编辑器标题: '{title_value}'")
+                if not title_value or not title_value.strip():
                     log("标题为空，文档导入失败")
                     return ToolResult(success=False, error="文档导入失败，标题为空")
             except Exception as e:
