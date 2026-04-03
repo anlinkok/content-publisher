@@ -89,25 +89,37 @@ class ZhihuTool(PlatformTool):
             
             await asyncio.sleep(2)
             
-            # 发布按钮
+            # 点击第一个"发布"按钮（工具栏上的）
             publish_btn = await self.page.wait_for_selector('button:has-text("发布")')
             await publish_btn.click()
+            logger.info("点击了工具栏发布按钮")
             
+            # 等待发布确认弹窗出现
             await asyncio.sleep(3)
             
-            # 检查是否有确认对话框
+            # 在弹窗中点击蓝色的"发布"按钮
+            # 弹窗里的按钮可能是 type="submit" 或者有特定 class
             try:
-                confirm_btn = await self.page.wait_for_selector('button:has-text("确认发布")', timeout=5000)
-                await confirm_btn.click()
-                await asyncio.sleep(3)
-            except:
-                pass
+                # 查找所有包含"发布"的按钮，点击最后一个（弹窗里的）
+                publish_buttons = await self.page.query_selector_all('button:has-text("发布")')
+                if len(publish_buttons) >= 2:
+                    await publish_buttons[-1].click()
+                    logger.info("点击了弹窗中的发布按钮")
+                else:
+                    # 尝试其他选择器
+                    modal_publish = await self.page.wait_for_selector('button[type="submit"]:has-text("发布"), .Modal button:has-text("发布"), [role="dialog"] button:has-text("发布")', timeout=5000)
+                    await modal_publish.click()
+                    logger.info("点击了弹窗发布按钮(选择器)")
+            except Exception as e:
+                logger.warning(f"点击弹窗发布按钮失败: {e}")
             
-            # 等待发布完成（页面跳转）
-            await asyncio.sleep(5)
+            # 等待发布完成
+            await asyncio.sleep(8)
             
             # 获取文章链接
             current_url = self.page.url
+            logger.info(f"当前URL: {current_url}")
+            
             if "/p/" in current_url:
                 post_id = current_url.split("/p/")[1].split("?")[0]
                 return ToolResult(
@@ -116,7 +128,6 @@ class ZhihuTool(PlatformTool):
                     post_url=current_url
                 )
             
-            # 如果没跳转，可能还在编辑页，检查是否有"已保存"提示
             return ToolResult(success=False, error="文章可能只保存到草稿箱，未正式发布")
             
         except Exception as e:
