@@ -144,31 +144,31 @@ class BaijiahaoTool(PlatformTool):
         return False
     
     async def close_guide(self):
-        """关闭引导弹窗"""
+        """关闭引导弹窗 - 循环点击直到没有"""
         guide_buttons = [
-            ("button", "我知道了"),
-            ("button", "下一步"),
-            ("button", "完成"),
+            'button:has-text("我知道了")',
+            'button:has-text("下一步")',
+            'button:has-text("完成")',
         ]
         
-        for role, name in guide_buttons:
-            try:
-                btn = await self.page.get_by_role(role, name=name).first
-                if btn and await btn.is_visible():
-                    await btn.click()
-                    log(f"已点击: {name}")
-                    await asyncio.sleep(0.5)
-            except:
-                continue
+        for _ in range(10):  # 最多尝试10次
+            clicked = False
+            for selector in guide_buttons:
+                try:
+                    btn = await self.page.wait_for_selector(selector, timeout=2000)
+                    if btn and await btn.is_visible():
+                        await btn.click()
+                        text = await btn.text_content()
+                        log(f"已点击: {text}")
+                        clicked = True
+                        await asyncio.sleep(0.8)
+                except:
+                    continue
+            
+            if not clicked:
+                break
         
-        # 关闭其他可能的弹窗
-        try:
-            close_icon = await self.page.locator("[class*='close']").first
-            if close_icon and await close_icon.is_visible():
-                await close_icon.click()
-                log("已点击关闭图标")
-        except:
-            pass
+        log("引导弹窗已关闭")
     
     async def publish(self, article, file_path: str = None) -> ToolResult:
         """使用文档导入功能发布"""
@@ -240,15 +240,42 @@ class BaijiahaoTool(PlatformTool):
             
             await asyncio.sleep(2)
             
-            # 第5步：选择文档并上传
+            # 第5步：选择文档并上传（修复：先点击按钮，再精确定位file input）
             log(f"选择文档: {original_file}")
             try:
+                # 先点击"选择文档"按钮
                 await self.page.get_by_role("button", name="选择文档").click()
+                log("已点击'选择文档'按钮")
                 await asyncio.sleep(1)
                 
-                file_input = await self.page.wait_for_selector('input[type="file"]', timeout=10000)
-                await file_input.set_input_files(original_file)
-                log("文件已上传")
+                # 找所有file input，选择文档类型的（不是视频）
+                file_inputs = await self.page.locator('input[type="file"]').all()
+                doc_input = None
+                for inp in file_inputs:
+                    try:
+                        accept = await inp.get_attribute('accept')
+                        if accept and ('doc' in accept.lower() or 'word' in accept.lower()):
+                            doc_input = inp
+                            log(f"找到文档上传input, accept={accept}")
+                            break
+                    except:
+                        continue
+                
+                if not doc_input and len(file_inputs) > 0:
+                    # 如果只有一个或没找到特定的，用第一个不是video的
+                    for inp in file_inputs:
+                        accept = await inp.get_attribute('accept') or ''
+                        if 'video' not in accept:
+                            doc_input = inp
+                            log(f"使用非视频input, accept={accept}")
+                            break
+                
+                if doc_input:
+                    await doc_input.set_input_files(original_file)
+                    log("文件已上传")
+                else:
+                    raise Exception("找不到文档上传input")
+                    
             except Exception as e:
                 log(f"上传文件失败: {e}")
                 return ToolResult(success=False, error=f"上传文件失败: {e}")
