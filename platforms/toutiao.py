@@ -75,7 +75,7 @@ class ToutiaoTool(PlatformTool):
             await self.page.goto("https://mp.toutiao.com/profile_v4/index", wait_until="domcontentloaded")
             await asyncio.sleep(3)
             
-            # 检查是否跳转到登录页
+            # 检查 URL 是否被重定向到登录页
             current_url = self.page.url
             if "/login" in current_url or "/auth/page/login" in current_url:
                 log(f"未登录，URL: {current_url}")
@@ -154,7 +154,6 @@ class ToutiaoTool(PlatformTool):
     async def close_popup(self):
         """关闭可能的弹窗"""
         try:
-            # 尝试点击关闭按钮
             close_selectors = [
                 '.close-btn',
                 '.modal-close',
@@ -182,6 +181,7 @@ class ToutiaoTool(PlatformTool):
                 return ToolResult(success=False, error="登录失败")
         
         try:
+            # 优先使用传入的 file_path
             original_file = file_path or getattr(article, 'source_file', None)
             article_title = getattr(article, 'title', '')
             
