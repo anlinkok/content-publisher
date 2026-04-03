@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  publisher:
+    build: .
+    container_name: content-publisher
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./articles:/app/articles
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+    environment:
+      - DISPLAY=${DISPLAY:-:99}
+    command: python3 publisher.py scheduler
+    restart: unless-stopped
+    
+  # 可选：Web界面服务
+  web:
+    build: .
+    container_name: content-publisher-web
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./articles:/app/articles
+    command: python3 web_server.py
+    restart: unless-stopped
+    profiles:
+      - web
