@@ -217,24 +217,23 @@ class BaijiahaoTool(PlatformTool):
             await self.close_guide()
             await asyncio.sleep(1)
             
-            # 第4步：鼠标悬停"插入"，然后点击"导入文档"
-            log("鼠标悬停'插入'，点击'导入文档'...")
+            # 第4步：点击"插入"，然后点击"导入文档"
+            log("点击'插入'，然后点击'导入文档'...")
             try:
-                # 先找到"插入"元素并悬停
-                insert_element = await self.page.get_by_text("插入").first
-                await insert_element.hover()
-                log("已悬停'插入'")
+                # 点击"插入"按钮
+                await self.page.get_by_text("插入").first.click()
+                log("已点击'插入'")
                 await asyncio.sleep(1)
                 
-                # 然后点击"导入文档"
+                # 点击"导入文档"
                 await self.page.get_by_text("导入文档").click()
                 log("已点击导入文档")
             except Exception as e:
                 log(f"点击导入文档失败: {e}")
-                # 备用：尝试直接点击
+                # 备用：尝试直接定位
                 try:
-                    await self.page.get_by_text("导入文档").click(force=True)
-                    log("已强制点击导入文档")
+                    await self.page.locator('text=导入文档').click()
+                    log("已点击导入文档（备用选择器）")
                 except:
                     return ToolResult(success=False, error="找不到导入文档入口")
             
