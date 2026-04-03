@@ -165,7 +165,7 @@ class BaijiahaoTool(PlatformTool):
             await asyncio.sleep(2)
             
             log("点击'导入文档'...")
-            await self.page.get_by_text("导入文档").click()
+            await self.page.get_by_text("导入文档").click(force=True)
             log("已点击'导入文档'")
             await asyncio.sleep(2)
             
