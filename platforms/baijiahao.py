@@ -191,18 +191,32 @@ class BaijiahaoTool(PlatformTool):
             
             # 上传文件（直接操作input，避免系统弹窗）
             log(f"上传文件: {original_file}")
+            upload_success = False
             try:
-                # 直接找 file input 设置文件，不点击"选择文档"按钮
+                # 等待一下让input元素加载
+                await asyncio.sleep(2)
+                # 直接找所有 file input
                 file_inputs = await self.page.locator('input[type="file"]').all()
+                log(f"找到 {len(file_inputs)} 个 file input")
                 for inp in file_inputs:
-                    accept = await inp.get_attribute('accept') or ''
-                    if 'video' not in accept and ('doc' in accept or 'word' in accept or accept == ''):
-                        await inp.set_input_files(original_file)
-                        log("文件已上传")
-                        break
-                await asyncio.sleep(2)  # 等待系统弹窗关闭
+                    try:
+                        accept = await inp.get_attribute('accept') or ''
+                        log(f"检查 input, accept={accept}")
+                        if 'video' not in accept and ('doc' in accept.lower() or 'word' in accept.lower() or '.doc' in accept or accept == ''):
+                            await inp.set_input_files(original_file)
+                            log("文件已直接上传到input")
+                            upload_success = True
+                            break
+                    except Exception as ie:
+                        log(f"单个input上传失败: {ie}")
+                        continue
+                
+                if not upload_success:
+                    raise Exception("没有找到合适的file input")
+                    
+                await asyncio.sleep(2)
             except Exception as e:
-                log(f"上传失败: {e}")
+                log(f"直接上传失败: {e}")
                 return ToolResult(success=False, error=f"上传失败: {e}")
             
             await asyncio.sleep(8)  # 等待导入
