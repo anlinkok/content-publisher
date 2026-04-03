@@ -227,7 +227,7 @@ class ContentPublisher:
         self.active_tools[platform] = tool
         return tool
     
-    async def publish_article(self, article: Article, platforms: List[str] = None) -> dict:
+    async def publish_article(self, article: Article, platforms: List[str] = None, file_path: str = None) -> dict:
         """发布文章"""
         if platforms is None:
             platforms = json.loads(article.platforms)
@@ -246,7 +246,7 @@ class ContentPublisher:
                     continue
                 
                 try:
-                    result = await tool.publish(article)
+                    result = await tool.publish(article, file_path=file_path)
                     results[platform] = result
                     
                     # 保存记录
@@ -321,7 +321,7 @@ def publish(file_path: str):
     async def do_publish():
         publisher = ContentPublisher()
         try:
-            results = await publisher.publish_article(article)
+            results = await publisher.publish_article(article, file_path=file_path)
             
             table = Table(title="发布结果")
             table.add_column("平台", style="cyan")

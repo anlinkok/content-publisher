@@ -24,6 +24,7 @@ class ZhihuTool(PlatformTool):
     def __init__(self, account=None):
         super().__init__(account)
         self.cookie_file = COOKIE_DIR / "zhihu.json"
+        self._file_path = None  # 保存文件路径
     
     async def init_browser(self, headless: bool = True, load_cookie: bool = True):
         from playwright.async_api import async_playwright
@@ -78,18 +79,18 @@ class ZhihuTool(PlatformTool):
         self._is_authenticated = True
         return True
     
-    async def publish(self, article) -> ToolResult:
+    async def publish(self, article, file_path: str = None) -> ToolResult:
         """使用文档导入功能发布"""
         if not self._is_authenticated:
             if not await self.authenticate():
                 return ToolResult(success=False, error="登录失败")
         
         try:
-            # 获取原始文件路径
-            original_file = getattr(article, 'source_file', None)
+            # 获取原始文件路径（优先使用传入的参数）
+            original_file = file_path or getattr(article, 'source_file', None)
             
             if not original_file or not os.path.exists(original_file):
-                return ToolResult(success=False, error="找不到原始文件，无法使用导入功能")
+                return ToolResult(success=False, error=f"找不到原始文件: {original_file}")
             
             # 进入创作页面
             await self.page.goto("https://zhuanlan.zhihu.com/write")
@@ -99,17 +100,14 @@ class ZhihuTool(PlatformTool):
             # 查找并点击"导入文档"按钮
             logger.info("点击导入文档按钮...")
             try:
-                # 尝试多种选择器
                 import_btn = await self.page.wait_for_selector(
-                    'button:has-text("导入文档"), [data-tooltip="导入文档"], '
-                    'div:has-text("导入文档"), span:has-text("导入文档")',
+                    'button:has-text("导入文档"), [data-tooltip="导入文档"], span:has-text("导入文档")',
                     timeout=10000
                 )
                 await import_btn.click()
                 await asyncio.sleep(2)
             except Exception as e:
                 logger.warning(f"找不到导入文档按钮: {e}")
-                # 可能页面已经加载了文档导入界面
             
             # 查找文件上传输入框
             logger.info(f"上传文件: {original_file}")
@@ -118,19 +116,15 @@ class ZhihuTool(PlatformTool):
             
             # 等待导入完成
             logger.info("等待文档导入完成...")
-            await asyncio.sleep(10)  # 导入需要时间
+            await asyncio.sleep(10)
             
-            # 等待导入完成的提示或内容出现
+            # 等待导入完成的提示
             try:
-                # 等待标题出现（说明导入成功）
                 await self.page.wait_for_selector('textarea[placeholder*="标题"]', timeout=30000)
-                # 检查标题是否已填充
                 title_input = await self.page.query_selector('textarea[placeholder*="标题"]')
                 title_value = await title_input.input_value()
                 if title_value:
                     logger.info(f"文档导入成功，标题: {title_value}")
-                else:
-                    logger.warning("文档导入后标题为空")
             except Exception as e:
                 logger.warning(f"等待导入完成超时: {e}")
             
