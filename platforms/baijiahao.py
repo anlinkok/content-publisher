@@ -218,10 +218,25 @@ class BaijiahaoTool(PlatformTool):
             
             await asyncio.sleep(2)
             
+            # 关闭可能的弹窗
+            log("关闭弹窗...")
+            try:
+                # 尝试点击关闭按钮
+                await self.page.locator('.cheetah-modal-close, .cheetah-icon-close, [class*="close"]').first.click()
+                log("已关闭弹窗")
+                await asyncio.sleep(1)
+            except:
+                pass
+            
             # 发布
             log("点击发布...")
-            await self.page.get_by_test_id("publish-btn").click()
-            log("已点击发布")
+            try:
+                await self.page.get_by_test_id("publish-btn").click()
+                log("已点击发布")
+            except:
+                # 备用：JS点击
+                await self.page.evaluate('document.querySelector("[data-testid=\\'publish-btn\\']").click()')
+                log("已通过JS点击发布")
             
             await asyncio.sleep(5)
             
