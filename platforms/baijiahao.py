@@ -217,28 +217,25 @@ class BaijiahaoTool(PlatformTool):
             await self.close_guide()
             await asyncio.sleep(1)
             
-            # 第4步：直接点击"导入文档"（不经过插入菜单）
-            log("点击'导入文档'...")
+            # 第4步：点击"插入"展开菜单，然后点击"导入文档"
+            log("点击'插入'展开菜单...")
             import_success = False
             
-            # 尝试1：直接找"导入文档"按钮/链接
+            # 尝试1：点击"插入"按钮
             try:
+                insert_btn = await self.page.get_by_text("插入").first
+                await insert_btn.click()
+                log("已点击'插入'")
+                await asyncio.sleep(1)
+                
+                # 点击"导入文档"
                 await self.page.get_by_text("导入文档").click()
-                log("已直接点击导入文档")
+                log("已点击导入文档")
                 import_success = True
             except Exception as e:
-                log(f"直接点击导入文档失败: {e}")
+                log(f"点击插入失败: {e}")
             
-            # 尝试2：尝试通过locator定位
-            if not import_success:
-                try:
-                    await self.page.locator('text=导入文档').click()
-                    log("已通过locator点击导入文档")
-                    import_success = True
-                except Exception as e:
-                    log(f"locator点击失败: {e}")
-            
-            # 尝试3：悬停"插入"展开菜单
+            # 尝试2：悬停"插入"展开菜单
             if not import_success:
                 try:
                     log("尝试悬停'插入'菜单...")
@@ -251,20 +248,6 @@ class BaijiahaoTool(PlatformTool):
                     import_success = True
                 except Exception as e:
                     log(f"悬停插入失败: {e}")
-            
-            # 尝试4：JavaScript强制点击
-            if not import_success:
-                try:
-                    await self.page.evaluate("""
-                        const btn = document.querySelector('button:contains(导入文档)') || 
-                                   document.querySelector('[class*="import"]') ||
-                                   Array.from(document.querySelectorAll('*')).find(el => el.textContent.includes('导入文档'));
-                        if (btn) btn.click();
-                    """)
-                    log("已通过JS点击导入文档")
-                    import_success = True
-                except Exception as e:
-                    log(f"JS点击失败: {e}")
             
             if not import_success:
                 return ToolResult(success=False, error="找不到导入文档入口")
@@ -329,39 +312,31 @@ class BaijiahaoTool(PlatformTool):
             
             await asyncio.sleep(2)
             
-            # 第7步：选择封面模式（三图）
-            log("选择三图封面模式...")
+            # 第7步：选择封面模式（单图）
+            log("选择单图封面模式...")
             try:
-                await self.page.get_by_text("三图").click()
-                log("已选择三图")
+                await self.page.get_by_text("单图").click()
+                log("已选择单图")
             except Exception as e:
-                log(f"选择三图失败: {e}")
+                log(f"选择单图失败: {e}")
             
             await asyncio.sleep(1)
             
-            # 第8步：选择封面图片
+            # 第8步：选择封面图片（只选第一张）
             log("选择封面图片...")
             try:
                 # 点击选择封面
                 await self.page.locator("div").filter(has_text=re.compile(r"^选择封面$")).nth(4).click()
                 await asyncio.sleep(1)
                 
-                # 选择第2张和第3张图片
+                # 只选第1张图片
                 try:
                     checkbox1 = await self.page.locator("div:nth-child(2) > .e8c90bfac9d4eab4-checkbox").first
                     if checkbox1:
                         await checkbox1.click()
                         log("已选择第1张封面")
-                except:
-                    pass
-                
-                try:
-                    img2 = await self.page.locator("div:nth-child(3) > .e8c90bfac9d4eab4-imgWrapper > .e8c90bfac9d4eab4-img").first
-                    if img2:
-                        await img2.click()
-                        log("已选择第2张封面")
-                except:
-                    pass
+                except Exception as e:
+                    log(f"选择第1张封面失败: {e}")
                 
                 # 点击确定
                 await self.page.get_by_role("button", name=re.compile(r"确定 \(\d+\)")).click()
