@@ -309,6 +309,10 @@ def publish(file_path: str):
     article_id = ArticleManager.save_article(article)
     article.id = article_id
     
+    # 确保 source_file 存在（用于文档导入）
+    if not getattr(article, 'source_file', None):
+        article.source_file = file_path
+    
     console.print(Panel(f"[green]{article.title}[/green]", title="准备发布"))
     console.print(f"平台: {', '.join(json.loads(article.platforms))}")
     if article.cover_image:
