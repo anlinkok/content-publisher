@@ -217,40 +217,67 @@ class BaijiahaoTool(PlatformTool):
             await self.close_guide()
             await asyncio.sleep(1)
             
-            # 第4步：点击"插入"展开菜单，然后点击"导入文档"
-            log("点击'插入'展开菜单...")
-            import_success = False
-            
-            # 尝试1：点击"插入"按钮
+            # 第4步：直接通过 JavaScript 触发文件上传，绕过菜单
+            log("直接上传文件，绕过菜单...")
             try:
-                insert_btn = await self.page.get_by_text("插入").first
-                await insert_btn.click()
-                log("已点击'插入'")
-                await asyncio.sleep(1)
+                # 方法1：直接找隐藏的 file input 并设置文件
+                file_inputs = await self.page.locator('input[type="file"]').all()
+                doc_input = None
+                for inp in file_inputs:
+                    try:
+                        accept = await inp.get_attribute('accept')
+                        if accept and ('doc' in accept.lower() or 'word' in accept.lower()):
+                            doc_input = inp
+                            log(f"找到文档上传input, accept={accept}")
+                            break
+                    except:
+                        continue
                 
-                # 点击"导入文档"
-                await self.page.get_by_text("导入文档").click()
-                log("已点击导入文档")
-                import_success = True
+                if doc_input:
+                    await doc_input.set_input_files(original_file)
+                    log("文件已直接上传")
+                else:
+                    # 方法2：通过 JS 创建 file input 并触发
+                    log("尝试通过JS上传...")
+                    await self.page.evaluate(f"""
+                        return new Promise((resolve, reject) => {{
+                            const input = document.createElement('input');
+                            input.type = 'file';
+                            input.accept = '.docx,.doc';
+                            input.style.display = 'none';
+                            document.body.appendChild(input);
+                            
+                            input.addEventListener('change', (e) => {{
+                                const file = e.target.files[0];
+                                if (file) {{
+                                    // 触发上传逻辑
+                                    const event = new CustomEvent('baijiahaoFileSelected', {{ detail: file }});
+                                    document.dispatchEvent(event);
+                                    resolve('File selected');
+                                }} else {{
+                                    reject('No file selected');
+                                }}
+                            }});
+                            
+                            input.click();
+                        }});
+                    """)
+                    # 手动设置文件
+                    file_input = await self.page.wait_for_selector('input[type="file"]', timeout=5000)
+                    await file_input.set_input_files(original_file)
+                    log("文件已通过JS上传")
             except Exception as e:
-                log(f"点击插入失败: {e}")
-            
-            # 尝试2：悬停"插入"展开菜单
-            if not import_success:
+                log(f"直接上传失败: {{e}}")
+                # 备用：尝试点击"选择文档"按钮
                 try:
-                    log("尝试悬停'插入'菜单...")
-                    insert_btn = await self.page.get_by_text("插入").first
-                    await insert_btn.hover()
-                    log("已悬停'插入'")
+                    await self.page.get_by_role("button", name="选择文档").click()
                     await asyncio.sleep(1)
-                    await self.page.get_by_text("导入文档").click()
-                    log("已点击导入文档（通过悬停）")
-                    import_success = True
-                except Exception as e:
-                    log(f"悬停插入失败: {e}")
-            
-            if not import_success:
-                return ToolResult(success=False, error="找不到导入文档入口")
+                    file_input = await self.page.wait_for_selector('input[type="file"]', timeout=5000)
+                    await file_input.set_input_files(original_file)
+                    log("文件已通过按钮上传")
+                except Exception as e2:
+                    log(f"按钮上传也失败: {{e2}}")
+                    return ToolResult(success=False, error="无法上传文件")
             
             await asyncio.sleep(2)
             
