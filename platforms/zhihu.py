@@ -116,18 +116,14 @@ class ZhihuTool(PlatformTool):
             logger.info("等待文件选择弹窗...")
             await asyncio.sleep(5)
             
-            # 处理文件选择弹窗
+            # 点击文件行选中，然后点确认按钮
             try:
-                # 等待弹窗标题
-                await self.page.wait_for_selector('text=选择文件', timeout=10000)
-                logger.info("弹窗已出现")
-                
                 file_name = os.path.basename(original_file)
                 logger.info(f"点击文件: {file_name}")
                 
-                # 点击文件行选中（不点圆圈，直接点行）
+                # 点击文件行
                 file_row = await self.page.wait_for_selector(
-                    f'text={file_name}',  # 直接用text匹配
+                    f'text={file_name}',
                     timeout=10000
                 )
                 await file_row.click()
@@ -138,7 +134,7 @@ class ZhihuTool(PlatformTool):
                 # 点击"请选择文件"按钮
                 confirm_btn = await self.page.wait_for_selector('button:has-text("请选择文件")', timeout=10000)
                 await confirm_btn.click()
-                logger.info("已点击确认")
+                logger.info("已点击确认按钮")
                 
                 await asyncio.sleep(10)
             except Exception as e:
