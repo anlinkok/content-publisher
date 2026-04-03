@@ -40,15 +40,13 @@ class ZhihuTool(PlatformTool):
         console.print("[yellow]请在浏览器中完成知乎登录...[/yellow]")
         await self.page.goto("https://www.zhihu.com/signin")
         
-        try:
-            await self.page.wait_for_selector('[data-za-detail-view-element_name="UserAvatar"]', timeout=120000)
-            self._is_authenticated = True
-            await self.save_session()
-            logger.info("知乎: 登录成功")
-            return True
-        except:
-            logger.error("知乎: 登录超时")
-            return False
+        # 手动确认登录完成
+        input("登录完成后请按回车键继续...")
+        
+        self._is_authenticated = True
+        await self.save_session()
+        logger.info("知乎: 登录成功")
+        return True
     
     async def publish(self, article) -> ToolResult:
         """发布到知乎专栏"""
