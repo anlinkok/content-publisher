@@ -100,10 +100,9 @@ class ZhihuTool(PlatformTool):
             # 查找并点击"导入"按钮
             logger.info("点击导入按钮...")
             try:
-                # 尝试多种选择器找到"导入"按钮
+                # 右上角工具栏的"导入"按钮
                 import_btn = await self.page.wait_for_selector(
-                    'button:has-text("导入"), [aria-label="导入"], .Toolbar-import, '
-                    '[class*="import"], span:has-text("导入")',
+                    'button:has-text("导入"), [aria-label="导入"], .Toolbar-import',
                     timeout=10000
                 )
                 await import_btn.click()
@@ -118,29 +117,44 @@ class ZhihuTool(PlatformTool):
                     await doc_import.click()
                     await asyncio.sleep(2)
                 except:
-                    logger.info("没有下拉菜单或已在导入界面")
+                    logger.info("没有下拉菜单")
             except Exception as e:
                 logger.warning(f"点击导入按钮失败: {e}")
             
-            # 查找文件上传输入框（接受docx的）
-            logger.info(f"上传文件: {original_file}")
-            # 等待文件输入框出现
-            await asyncio.sleep(2)
+            # 等待"选择文件"弹窗出现
+            logger.info("等待文件选择弹窗...")
+            await asyncio.sleep(3)
             
-            # 找到接受 .docx 的文件输入框
-            file_inputs = await self.page.query_selector_all('input[type="file"]')
-            file_input = None
-            for inp in file_inputs:
-                accept = await inp.get_attribute('accept')
-                if accept and '.docx' in accept:
-                    file_input = inp
-                    break
-            
-            if not file_input:
-                # 如果没找到特定的，使用第一个
-                file_input = await self.page.wait_for_selector('input[type="file"]', timeout=10000)
-            
-            await file_input.set_input_files(original_file)
+            # 方法1: 尝试直接找到文件input（隐藏）
+            try:
+                # 找到接受 .docx 的文件输入框
+                file_inputs = await self.page.query_selector_all('input[type="file"]')
+                file_input = None
+                for inp in file_inputs:
+                    accept = await inp.get_attribute('accept')
+                    if accept and '.docx' in accept:
+                        file_input = inp
+                        break
+                
+                if file_input:
+                    logger.info(f"直接上传文件: {original_file}")
+                    await file_input.set_input_files(original_file)
+                else:
+                    # 方法2: 点击弹窗里的"请选择文件"按钮
+                    logger.info("点击弹窗里的选择文件按钮...")
+                    select_btn = await self.page.wait_for_selector(
+                        'button:has-text("请选择文件"), .Upload-select-btn',
+                        timeout=10000
+                    )
+                    await select_btn.click()
+                    await asyncio.sleep(2)
+                    
+                    # 等待文件输入框出现
+                    file_input = await self.page.wait_for_selector('input[type="file"]', timeout=10000)
+                    await file_input.set_input_files(original_file)
+            except Exception as e:
+                logger.error(f"文件上传失败: {e}")
+                raise
             
             # 等待导入完成
             logger.info("等待文档导入完成...")
