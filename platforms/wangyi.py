@@ -3,9 +3,14 @@
 """
 
 import asyncio
+import logging
 from typing import Optional
 from .base import PlatformTool, ToolResult
 from models import Article, Account
+from rich.console import Console
+
+console = Console()
+logger = logging.getLogger(__name__)
 
 
 class WangyiTool(PlatformTool):
