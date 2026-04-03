@@ -202,18 +202,35 @@ class BaijiahaoTool(PlatformTool):
             try:
                 await self.page.get_by_text("单图").click()
                 log("已选择单图")
-                await asyncio.sleep(1)
+                await asyncio.sleep(2)  # 增加等待
                 
                 # 点击选择封面
                 await self.page.locator("div").filter(has_text=re.compile(r"^选择封面$")).nth(4).click()
-                await asyncio.sleep(1)
+                log("已打开封面选择")
+                await asyncio.sleep(3)  # 等待封面加载
                 
-                # 选择第1张
-                await self.page.locator("div:nth-child(2) > .e8c90bfac9d4eab4-checkbox").first.click()
-                log("已选择封面")
+                # 选择第1张，重试3次
+                for i in range(3):
+                    try:
+                        await self.page.locator("div:nth-child(2) > .e8c90bfac9d4eab4-checkbox").first.click()
+                        log(f"已选择封面 (尝试{i+1})")
+                        await asyncio.sleep(2)
+                        break
+                    except Exception as e:
+                        log(f"选择封面失败 (尝试{i+1}): {e}")
+                        await asyncio.sleep(2)
                 
-                # 点击确定
-                await self.page.get_by_role("button", name=re.compile(r"确定 \(\d+\)")).click()
+                # 多点几次确定
+                for i in range(3):
+                    try:
+                        await self.page.get_by_role("button", name=re.compile(r"确定 \(\d+\)")).click()
+                        log(f"已点击确定 (尝试{i+1})")
+                        await asyncio.sleep(2)
+                        break
+                    except Exception as e:
+                        log(f"点击确定失败 (尝试{i+1}): {e}")
+                        await asyncio.sleep(1)
+                        
                 log("封面已确定")
             except Exception as e:
                 log(f"选择封面失败（可能已自动）: {e}")
