@@ -93,6 +93,17 @@ class ZhihuTool(PlatformTool):
             publish_btn = await self.page.wait_for_selector('button:has-text("发布")')
             await publish_btn.click()
             
+            await asyncio.sleep(3)
+            
+            # 检查是否有确认对话框
+            try:
+                confirm_btn = await self.page.wait_for_selector('button:has-text("确认发布")', timeout=5000)
+                await confirm_btn.click()
+                await asyncio.sleep(3)
+            except:
+                pass
+            
+            # 等待发布完成（页面跳转）
             await asyncio.sleep(5)
             
             # 获取文章链接
@@ -105,7 +116,8 @@ class ZhihuTool(PlatformTool):
                     post_url=current_url
                 )
             
-            return ToolResult(success=True, data={"url": current_url})
+            # 如果没跳转，可能还在编辑页，检查是否有"已保存"提示
+            return ToolResult(success=False, error="文章可能只保存到草稿箱，未正式发布")
             
         except Exception as e:
             logger.exception("知乎发布失败")
