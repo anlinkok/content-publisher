@@ -119,14 +119,59 @@ class ZhihuTool(PlatformTool):
             logger.info(f"直接上传文件: {original_file}")
             await target_input.set_input_files(original_file)
             
-            # 等待上传完成
-            logger.info("等待文档导入...")
-            await asyncio.sleep(15)
+            # 等待上传完成并出现弹窗
+            logger.info("等待文件选择弹窗...")
+            await asyncio.sleep(5)
             
-            # 检查是否有弹窗需要处理（如果有文件列表）
+            # 处理文件选择弹窗
             try:
-                # 查找"请选择文件"按钮
+                # 等待弹窗出现
+                await self.page.wait_for_selector('text=选择文件', timeout=10000)
+                logger.info("弹窗已出现")
+                
+                # 获取文件名
+                file_name = os.path.basename(original_file)
+                logger.info(f"查找文件: {file_name}")
+                
+                # 点击文件行选中（点击圆圈或整个行）
+                # 尝试多种选择器找到文件行
+                file_row = await self.page.wait_for_selector(
+                    f'div:has-text("{file_name}"), tr:has-text("{file_name}"), '
+                    f'[class*="file-item"]:has-text("{file_name}"), '
+                    f'li:has-text("{file_name}")',
+                    timeout=10000
+                )
+                
+                # 尝试点击圆圈/复选框
+                try:
+                    checkbox = await file_row.query_selector('input[type="checkbox"], [class*="checkbox"], [class*="radio"], [class*="circle"]')
+                    if checkbox:
+                        await checkbox.click()
+                        logger.info("已点击圆圈选中文件")
+                    else:
+                        # 如果没有找到checkbox，点击整个行
+                        await file_row.click()
+                        logger.info("已点击文件行")
+                except Exception as e:
+                    logger.warning(f"点击圆圈失败: {e}，尝试点击行")
+                    await file_row.click()
+                
+                await asyncio.sleep(2)
+                
+                # 点击"请选择文件"按钮
+                logger.info("点击请选择文件按钮...")
                 confirm_btn = await self.page.wait_for_selector(
+                    'button:has-text("请选择文件")',
+                    timeout=10000
+                )
+                await confirm_btn.click()
+                logger.info("已点击确认按钮")
+                
+                # 等待导入完成
+                await asyncio.sleep(10)
+            except Exception as e:
+                logger.warning(f"处理弹窗失败: {e}")
+                await asyncio.sleep(15)
                     'button:has-text("请选择文件"), button:has-text("确认")',
                     timeout=5000
                 )
