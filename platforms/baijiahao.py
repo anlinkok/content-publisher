@@ -217,23 +217,24 @@ class BaijiahaoTool(PlatformTool):
             await self.close_guide()
             await asyncio.sleep(1)
             
-            # 第4步：点击"插入"，然后点击"导入文档"
-            log("点击'插入'，然后点击'导入文档'...")
+            # 第4步：鼠标悬停"插入"展开菜单，然后点击"导入文档"
+            log("鼠标悬停'插入'展开菜单...")
             try:
-                # 点击"插入"按钮
-                await self.page.get_by_text("插入").first.click()
-                log("已点击'插入'")
+                # 先找到"插入"按钮并悬停
+                insert_btn = await self.page.get_by_text("插入").first
+                await insert_btn.hover()
+                log("已悬停'插入'")
                 await asyncio.sleep(1)
                 
                 # 点击"导入文档"
                 await self.page.get_by_text("导入文档").click()
                 log("已点击导入文档")
             except Exception as e:
-                log(f"点击导入文档失败: {e}")
-                # 备用：尝试直接定位
+                log(f"悬停插入失败: {e}")
+                # 备用：尝试直接点击
                 try:
-                    await self.page.locator('text=导入文档').click()
-                    log("已点击导入文档（备用选择器）")
+                    await self.page.get_by_text("导入文档").click()
+                    log("已直接点击导入文档")
                 except:
                     return ToolResult(success=False, error="找不到导入文档入口")
             
@@ -284,10 +285,16 @@ class BaijiahaoTool(PlatformTool):
             # 第6步：点击"全部采纳"
             log("点击'全部采纳'...")
             try:
-                await self.page.get_by_role("button", name="全部采纳").click()
+                await self.page.get_by_role("button", name="全部采纳").first.click()
                 log("已点击全部采纳")
             except Exception as e:
                 log(f"点击全部采纳失败: {e}")
+                # 备用：用选择器
+                try:
+                    await self.page.locator('button:has-text("全部采纳")').first.click()
+                    log("已点击全部采纳（备用选择器）")
+                except:
+                    pass
             
             await asyncio.sleep(2)
             
