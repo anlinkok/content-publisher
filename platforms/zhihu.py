@@ -1,11 +1,12 @@
 """
-知乎平台实现 - 使用 Playwright storage_state 持久化登录
+知乎平台实现 - 支持图片上传
 """
 
 import asyncio
 import json
 import logging
 import os
+import re
 from pathlib import Path
 from platforms.base import PlatformTool, ToolResult
 
@@ -121,6 +122,67 @@ class ZhihuTool(PlatformTool):
         logger.info("知乎: 登录成功，Cookie 已保存")
         return True
     
+    async def upload_cover_image(self, image_path: str) -> bool:
+        """上传封面图"""
+        try:
+            if not os.path.exists(image_path):
+                logger.warning(f"封面图不存在: {image_path}")
+                return False
+            
+            logger.info(f"上传封面图: {image_path}")
+            
+            # 等待封面上传区域出现
+            # 知乎封面通常是点击区域后弹出文件选择
+            cover_area = await self.page.wait_for_selector('.CoverSelector, [class*="cover"], [class*="Cover"]', timeout=10000)
+            await cover_area.click()
+            await asyncio.sleep(1)
+            
+            # 查找文件输入框
+            file_input = await self.page.wait_for_selector('input[type="file"]', timeout=5000)
+            await file_input.set_input_files(image_path)
+            
+            # 等待上传完成
+            await asyncio.sleep(3)
+            logger.info("封面图上传完成")
+            return True
+            
+        except Exception as e:
+            logger.warning(f"封面上传失败: {e}")
+            return False
+    
+    async def upload_content_image(self, image_path: str) -> bool:
+        """在正文编辑器中上传图片"""
+        try:
+            if not os.path.exists(image_path):
+                logger.warning(f"图片不存在: {image_path}")
+                return False
+            
+            logger.info(f"上传正文图片: {image_path}")
+            
+            # 方法1: 查找编辑器中的图片上传按钮
+            try:
+                img_btn = await self.page.wait_for_selector('button[aria-label="图片"], button:has-text("图片"), [class*="image"]', timeout=3000)
+                await img_btn.click()
+                await asyncio.sleep(1)
+                
+                file_input = await self.page.wait_for_selector('input[type="file"]', timeout=5000)
+                await file_input.set_input_files(image_path)
+                await asyncio.sleep(3)
+                logger.info("正文图片上传完成")
+                return True
+            except:
+                pass
+            
+            # 方法2: 直接粘贴图片
+            # 读取图片为 base64，然后用剪贴板粘贴
+            # 这个方法比较复杂，先跳过
+            logger.warning("正文图片上传功能暂未实现")
+            return False
+            
+        except Exception as e:
+            logger.warning(f"正文图片上传失败: {e}")
+            return False
+    
     async def publish(self, article) -> ToolResult:
         """发布到知乎专栏"""
         if not self._is_authenticated:
@@ -133,6 +195,13 @@ class ZhihuTool(PlatformTool):
             await self.page.goto("https://zhuanlan.zhihu.com/write")
             await self.page.wait_for_load_state("networkidle")
             await asyncio.sleep(3)
+            
+            # 上传封面图（如果有）
+            if article.cover_image:
+                cover_path = article.cover_image
+                if not os.path.isabs(cover_path):
+                    cover_path = os.path.join("articles", cover_path)
+                await self.upload_cover_image(cover_path)
             
             # 填写标题
             logger.info("填写标题...")
@@ -152,16 +221,37 @@ class ZhihuTool(PlatformTool):
             await self.page.keyboard.press('Delete')
             await asyncio.sleep(0.5)
             
-            # 处理内容：去掉 HTML 标签，纯文本输入
-            import re
-            text_content = re.sub(r'<[^>]+>', '', article.html_content)
+            # 处理内容：提取图片和文本
+            html_content = article.html_content
+            
+            # 查找所有图片标签
+            img_pattern = r'<img[^>]+src=["\']([^"\']+)["\'][^>]*>'
+            images = re.findall(img_pattern, html_content)
+            
+            # 去掉 HTML 标签，纯文本输入
+            text_content = re.sub(r'<[^>]+>', '\n', html_content)
             text_content = text_content.replace('&nbsp;', ' ').replace('&lt;', '<').replace('&gt;', '>').replace('&amp;', '&')
+            text_content = re.sub(r'\n+', '\n\n', text_content).strip()
             
             # 分段输入，带 delay 模拟人工
             paragraphs = text_content.split('\n\n')
             for i, para in enumerate(paragraphs):
                 if para.strip():
                     await self.page.keyboard.type(para.strip(), delay=10)
+                    
+                    # 在每个段落后尝试插入对应的图片
+                    if i < len(images):
+                        img_path = images[i]
+                        if not img_path.startswith('http'):
+                            # 本地图片
+                            if not os.path.isabs(img_path):
+                                img_path = os.path.join("articles", img_path)
+                            # 换行后上传图片
+                            await self.page.keyboard.press('Enter')
+                            await self.page.keyboard.press('Enter')
+                            await self.upload_content_image(img_path)
+                            await asyncio.sleep(2)
+                    
                     if i < len(paragraphs) - 1:
                         await self.page.keyboard.press('Enter')
                         await self.page.keyboard.press('Enter')
