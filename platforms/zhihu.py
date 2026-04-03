@@ -24,7 +24,6 @@ class ZhihuTool(PlatformTool):
     def __init__(self, account=None):
         super().__init__(account)
         self.cookie_file = COOKIE_DIR / "zhihu.json"
-        self._file_path = None  # 保存文件路径
     
     async def init_browser(self, headless: bool = True, load_cookie: bool = True):
         from playwright.async_api import async_playwright
@@ -86,84 +85,76 @@ class ZhihuTool(PlatformTool):
                 return ToolResult(success=False, error="登录失败")
         
         try:
-            # 获取原始文件路径（优先使用传入的参数）
+            # 获取原始文件路径
             original_file = file_path or getattr(article, 'source_file', None)
             
             if not original_file or not os.path.exists(original_file):
                 return ToolResult(success=False, error=f"找不到原始文件: {original_file}")
             
-            # 进入创作页面
+            logger.info("进入知乎创作页面...")
             await self.page.goto("https://zhuanlan.zhihu.com/write")
             await self.page.wait_for_load_state("networkidle")
             await asyncio.sleep(3)
             
-            # 查找并点击"导入"按钮
-            logger.info("点击导入按钮...")
+            # 方法：直接找到文件上传input并设置文件
+            # 知乎导入功能的文件input是隐藏的，可以直接操作
+            logger.info("查找文件上传input...")
+            
+            # 找到接受docx的input
+            file_inputs = await self.page.query_selector_all('input[type="file"]')
+            target_input = None
+            
+            for inp in file_inputs:
+                accept = await inp.get_attribute('accept')
+                if accept and ('.docx' in accept or '.doc' in accept):
+                    target_input = inp
+                    logger.info(f"找到文件input，accept={accept}")
+                    break
+            
+            if not target_input:
+                logger.warning("没找到特定accept的input，使用第一个")
+                target_input = await self.page.wait_for_selector('input[type="file"]', timeout=10000)
+            
+            # 直接上传文件（不需要点击导入按钮）
+            logger.info(f"直接上传文件: {original_file}")
+            await target_input.set_input_files(original_file)
+            
+            # 等待上传完成
+            logger.info("等待文档导入...")
+            await asyncio.sleep(15)
+            
+            # 检查是否有弹窗需要处理（如果有文件列表）
             try:
-                # 右上角工具栏的"导入"按钮
-                import_btn = await self.page.wait_for_selector(
-                    'button:has-text("导入"), [aria-label="导入"], .Toolbar-import',
-                    timeout=10000
+                # 查找"请选择文件"按钮
+                confirm_btn = await self.page.wait_for_selector(
+                    'button:has-text("请选择文件"), button:has-text("确认")',
+                    timeout=5000
                 )
-                await import_btn.click()
-                await asyncio.sleep(2)
+                # 检查是否有文件需要选中
+                checkboxes = await self.page.query_selector_all('input[type="checkbox"]')
+                if checkboxes:
+                    logger.info("选中文件...")
+                    await checkboxes[0].click()
+                    await asyncio.sleep(1)
                 
-                # 点击下拉菜单中的"文档导入"选项
-                try:
-                    doc_import = await self.page.wait_for_selector(
-                        'text=文档导入, [role="menuitem"]:has-text("文档"), li:has-text("文档")',
-                        timeout=5000
-                    )
-                    await doc_import.click()
-                    await asyncio.sleep(2)
-                except:
-                    logger.info("没有下拉菜单")
-            except Exception as e:
-                logger.warning(f"点击导入按钮失败: {e}")
+                logger.info("点击确认按钮...")
+                await confirm_btn.click()
+                await asyncio.sleep(5)
+            except:
+                logger.info("没有确认弹窗，继续等待导入")
+                await asyncio.sleep(10)
             
-            # 等待"选择文件"弹窗出现
-            logger.info("等待文件选择弹窗...")
-            await asyncio.sleep(3)
-            
-            # 检查是否有已上传的文件在列表中（需要点击圆圈选中）
-            try:
-                # 查找文件列表中的复选框/圆圈
-                file_items = await self.page.query_selector_all('.FileItem, [class*="file-item"], .upload-item')
-                if file_items:
-                    logger.info(f"发现 {len(file_items)} 个文件项")
-                    # 点击第一个文件的圆圈/复选框
-                    checkbox = await file_items[0].query_selector('.checkbox, [class*="checkbox"], [class*="radio"]')
-                    if checkbox:
-                        await checkbox.click()
-                        logger.info("已选中文件")
-                        await asyncio.sleep(1)
-                
-                # 点击"请选择文件"按钮确认
-                select_btn = await self.page.wait_for_selector(
-                    'button:has-text("请选择文件"), .Upload-select-btn, [class*="select-file"]',
-                    timeout=10000
-                )
-                await select_btn.click()
-                logger.info("已点击请选择文件按钮")
-            except Exception as e:
-                logger.warning(f"文件选择流程失败，尝试直接上传: {e}")
-                # 备选方案：直接找到文件input上传
-                file_input = await self.page.wait_for_selector('input[type="file"]', timeout=10000)
-                await file_input.set_input_files(original_file)
-            
-            # 等待导入完成
-            logger.info("等待文档导入完成...")
-            await asyncio.sleep(10)
-            
-            # 等待导入完成的提示
+            # 等待编辑器加载完成
             try:
                 await self.page.wait_for_selector('textarea[placeholder*="标题"]', timeout=30000)
                 title_input = await self.page.query_selector('textarea[placeholder*="标题"]')
                 title_value = await title_input.input_value()
                 if title_value:
                     logger.info(f"文档导入成功，标题: {title_value}")
+                else:
+                    logger.warning("标题为空，可能导入未完成")
             except Exception as e:
-                logger.warning(f"等待导入完成超时: {e}")
+                logger.warning(f"等待编辑器超时: {e}")
             
             await asyncio.sleep(3)
             
@@ -187,7 +178,7 @@ class ZhihuTool(PlatformTool):
                 await self.page.wait_for_url("**/p/**", timeout=30000)
                 logger.info("发布成功")
             except:
-                pass
+                logger.warning("等待页面跳转超时")
             
             await asyncio.sleep(3)
             current_url = self.page.url
