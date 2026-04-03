@@ -79,6 +79,7 @@ class ZhihuTool(PlatformTool):
         return True
     
     async def publish(self, article, file_path: str = None) -> ToolResult:
+        """使用文档导入功能发布"""
         if not self._is_authenticated:
             if not await self.authenticate():
                 return ToolResult(success=False, error="登录失败")
@@ -94,55 +95,35 @@ class ZhihuTool(PlatformTool):
             await self.page.wait_for_load_state("networkidle")
             await asyncio.sleep(3)
             
-            # 找到文件上传input
-            logger.info("查找文件上传input...")
-            file_inputs = await self.page.query_selector_all('input[type="file"]')
-            target_input = None
+            # 方法：使用 expect_file_chooser 处理文件上传
+            logger.info("准备上传文件...")
             
-            for inp in file_inputs:
-                accept = await inp.get_attribute('accept')
-                if accept and ('.docx' in accept or '.doc' in accept):
-                    target_input = inp
-                    break
-            
-            if not target_input:
-                target_input = await self.page.wait_for_selector('input[type="file"]', timeout=10000)
-            
-            # 上传文件
-            logger.info(f"上传文件: {original_file}")
-            await target_input.set_input_files(original_file)
-            
-            # 等待弹窗出现
-            logger.info("等待文件选择弹窗...")
-            await asyncio.sleep(5)
-            
-            # 点击文件行选中，然后点确认按钮
-            try:
-                file_name = os.path.basename(original_file)
-                logger.info(f"点击文件: {file_name}")
-                
-                # 点击文件行
-                file_row = await self.page.wait_for_selector(
-                    f'text={file_name}',
-                    timeout=10000
-                )
-                await file_row.click()
-                logger.info("已点击文件")
-                
+            async with self.page.expect_file_chooser() as fc_info:
+                # 点击"导入"按钮触发文件选择器
+                logger.info("点击导入按钮...")
+                import_btn = await self.page.wait_for_selector('button:has-text("导入")', timeout=10000)
+                await import_btn.click()
                 await asyncio.sleep(2)
                 
-                # 点击"请选择文件"按钮
-                confirm_btn = await self.page.wait_for_selector('button:has-text("请选择文件")', timeout=10000)
-                await confirm_btn.click()
-                logger.info("已点击确认按钮")
-                
-                await asyncio.sleep(10)
-            except Exception as e:
-                logger.warning(f"处理弹窗失败: {e}")
-                await asyncio.sleep(15)
+                # 点击"文档导入"选项
+                try:
+                    doc_import = await self.page.wait_for_selector('text=文档导入', timeout=5000)
+                    await doc_import.click()
+                    logger.info("已点击文档导入")
+                except:
+                    logger.info("没有文档导入选项，继续")
+            
+            # 获取文件选择器并设置文件
+            file_chooser = await fc_info.value
+            logger.info(f"选择文件: {original_file}")
+            await file_chooser.set_files(original_file)
+            
+            # 等待导入完成
+            logger.info("等待文档导入完成...")
+            await asyncio.sleep(15)
             
             # 发布
-            logger.info("点击发布...")
+            logger.info("点击发布按钮...")
             publish_btn = await self.page.wait_for_selector('button:has-text("发布")', timeout=10000)
             await publish_btn.click()
             await asyncio.sleep(3)
@@ -152,15 +133,24 @@ class ZhihuTool(PlatformTool):
                 publish_buttons = await self.page.query_selector_all('button:has-text("发布")')
                 if len(publish_buttons) >= 2:
                     await publish_buttons[-1].click()
+                    logger.info("已点击确认发布按钮")
             except:
                 pass
             
-            await asyncio.sleep(5)
+            # 等待跳转
+            try:
+                await self.page.wait_for_url("**/p/**", timeout=30000)
+                logger.info("发布成功")
+            except:
+                logger.warning("等待页面跳转超时")
+            
+            await asyncio.sleep(3)
             current_url = self.page.url
             
             if "/p/" in current_url:
                 post_id = current_url.split("/p/")[1].split("?")[0]
                 return ToolResult(success=True, post_id=post_id, post_url=current_url)
+            
             return ToolResult(success=True, post_url=current_url)
             
         except Exception as e:
