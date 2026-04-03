@@ -75,40 +75,20 @@ class ToutiaoTool(PlatformTool):
             await self.page.goto("https://mp.toutiao.com/profile_v4/index", wait_until="domcontentloaded")
             await asyncio.sleep(3)
             
-            # 检查 URL 是否被重定向到登录页
             current_url = self.page.url
             if "/login" in current_url or "/auth/page/login" in current_url:
                 log(f"未登录，URL: {current_url}")
                 return False
             
-            # 检查是否有"文章"链接（已登录用户才有创作入口）
             try:
                 article_link = await self.page.wait_for_selector('a[href*="graphic/publish"], [role="link"]:has-text("文章")', timeout=5000)
-                if article_link:
-                    is_visible = await article_link.is_visible()
-                    if is_visible:
-                        log("检测到登录状态：有文章创作入口")
-                        return True
+                if article_link and await article_link.is_visible():
+                    log("检测到登录状态：有文章创作入口")
+                    return True
             except:
                 pass
             
-            # 检查用户名/头像
-            user_selectors = [
-                '.user-name',
-                '.avatar',
-                '.user-info',
-                '[class*="userName"]',
-            ]
-            for selector in user_selectors:
-                try:
-                    element = await self.page.query_selector(selector)
-                    if element and await element.is_visible():
-                        log(f"检测到登录状态，选择器: {selector}")
-                        return True
-                except:
-                    continue
-            
-            log("登录状态不确定，假设已登录")
+            log("登录状态不确定")
             return True
             
         except Exception as e:
@@ -116,7 +96,7 @@ class ToutiaoTool(PlatformTool):
             return False
     
     async def authenticate(self) -> bool:
-        """自动检测登录状态，需要时引导登录"""
+        """自动检测登录状态"""
         from rich.console import Console
         console = Console()
         
@@ -160,6 +140,7 @@ class ToutiaoTool(PlatformTool):
                 '[class*="close"]',
                 'button:has-text("×")',
                 'button:has-text("关闭")',
+                '.byte-modal-close',
             ]
             for selector in close_selectors:
                 try:
@@ -189,132 +170,262 @@ class ToutiaoTool(PlatformTool):
                 return ToolResult(success=False, error=f"找不到原始文件: {original_file}")
             
             log("进入头条号创作页面...")
-            await self.page.goto("https://mp.toutiao.com/profile_v4/index")
+            await self.page.goto("https://mp.toutiao.com/profile_v4/graphic/publish")
             await self.page.wait_for_load_state("networkidle")
-            await asyncio.sleep(3)
+            await asyncio.sleep(5)
             
-            # 第1步：点击"文章"
-            log("点击'文章'...")
-            try:
-                await self.page.get_by_role("link", name="文章").click()
-                log("已点击'文章'")
-            except Exception as e:
-                log(f"点击文章失败: {e}")
-                # 备用：直接访问创作页面
-                await self.page.goto("https://mp.toutiao.com/profile_v4/graphic/publish")
-            
-            await asyncio.sleep(3)
-            
-            # 第2步：关闭可能的弹窗
+            # 关闭可能的弹窗
             log("关闭可能的弹窗...")
             await self.close_popup()
+            await asyncio.sleep(1)
             
-            # 第3步：点击文档导入按钮
+            # 第1步：点击文档导入按钮
             log("点击文档导入按钮...")
-            try:
-                # 根据录制代码，选择器是 .syl-toolbar-tool.doc-import
-                await self.page.locator(".syl-toolbar-tool.doc-import > div > .syl-toolbar-button").click()
-                log("已点击文档导入")
-            except Exception as e:
-                log(f"点击文档导入失败: {e}")
-                # 备用：尝试其他选择器
+            doc_import_clicked = False
+            
+            # 尝试多种选择器
+            selectors_to_try = [
+                '.syl-toolbar-tool.doc-import',
+                '[class*="doc-import"]',
+                'button:has-text("导入文档")',
+                'div:has-text("导入文档")',
+            ]
+            
+            for selector in selectors_to_try:
                 try:
-                    await self.page.click('text=导入文档', timeout=5000)
-                    log("已点击'导入文档'（备用）")
-                except:
-                    return ToolResult(success=False, error="找不到文档导入按钮")
+                    element = await self.page.wait_for_selector(selector, timeout=3000)
+                    if element and await element.is_visible():
+                        await element.click()
+                        log(f"已点击文档导入: {selector}")
+                        doc_import_clicked = True
+                        await asyncio.sleep(2)
+                        break
+                except Exception as e:
+                    log(f"选择器 {selector} 失败: {e}")
+                    continue
+            
+            if not doc_import_clicked:
+                # 尝试通过父元素点击
+                try:
+                    await self.page.evaluate("""
+                        const btn = document.querySelector('.syl-toolbar-tool.doc-import') || 
+                                   document.querySelector('[title="导入文档"]') ||
+                                   document.querySelector('div[class*="import"]');
+                        if (btn) btn.click();
+                    """)
+                    log("通过 JS 点击文档导入")
+                    await asyncio.sleep(2)
+                    doc_import_clicked = True
+                except Exception as e:
+                    log(f"JS 点击失败: {e}")
+            
+            if not doc_import_clicked:
+                return ToolResult(success=False, error="找不到文档导入按钮")
             
             await asyncio.sleep(2)
             
-            # 第4步：上传文件
+            # 第2步：上传文件
             log(f"上传文件: {original_file}")
             try:
-                # 直接操作 file input
+                # 等待 file input 出现
                 file_input = await self.page.wait_for_selector('input[type="file"]', timeout=10000)
                 await file_input.set_input_files(original_file)
-                log("文件已上传")
+                log("文件已上传，等待导入...")
             except Exception as e:
                 log(f"上传文件失败: {e}")
                 return ToolResult(success=False, error=f"上传文件失败: {e}")
             
-            # 第5步：等待文档导入完成（内容出现在编辑器中）
+            # 第3步：等待文档导入完成
             log("等待文档导入完成...")
-            await asyncio.sleep(5)
+            await asyncio.sleep(8)  # 增加等待时间
             
-            # 第6步：填写标题
+            # 关闭可能弹出的提示
+            await self.close_popup()
+            await asyncio.sleep(1)
+            
+            # 第4步：填写标题
             if article_title:
                 log(f"填写标题: {article_title}")
                 try:
-                    title_input = await self.page.get_by_role(
-                        "textbox", 
-                        name="请输入文章标题（2～30个字）"
-                    )
-                    await title_input.fill(article_title)
-                    log("标题已填写")
+                    # 尝试多种标题输入框选择器
+                    title_selectors = [
+                        'input[placeholder*="标题"]',
+                        'textarea[placeholder*="标题"]',
+                        '[class*="title"] input',
+                        '[class*="title"] textarea',
+                    ]
+                    
+                    for selector in title_selectors:
+                        try:
+                            title_input = await self.page.wait_for_selector(selector, timeout=3000)
+                            if title_input and await title_input.is_visible():
+                                await title_input.fill(article_title)
+                                log(f"标题已填写 via {selector}")
+                                break
+                        except:
+                            continue
+                    else:
+                        # 使用 JS 填写
+                        await self.page.evaluate(f"""
+                            const inputs = document.querySelectorAll('input, textarea');
+                            for (const input of inputs) {{
+                                if (input.placeholder && input.placeholder.includes('标题')) {{
+                                    input.value = '{article_title}';
+                                    input.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                                    input.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                                    break;
+                                }}
+                            }}
+                        """)
+                        log("标题已通过 JS 填写")
                 except Exception as e:
                     log(f"填写标题失败: {e}")
             
-            # 第7步：设置广告（选择无广告或默认）
+            await asyncio.sleep(2)
+            
+            # 第5步：设置广告（可选）
             log("设置广告选项...")
             try:
-                # 选择第一个广告选项（无广告或默认）
-                await self.page.locator(".byte-radio.article-ad-radio > span > .byte-radio-inner").first.click()
+                await self.page.locator(".byte-radio.article-ad-radio").first.click()
                 log("广告选项已设置")
             except Exception as e:
                 log(f"设置广告选项失败（可能已默认）: {e}")
             
-            # 第8步：选择分类（可选，尝试选择第一个）
+            await asyncio.sleep(1)
+            
+            # 第6步：选择分类（可选）
             log("选择分类...")
             try:
-                # 尝试选择第一个分类
-                checkboxes = await self.page.locator(".byte-checkbox-group > label > .byte-checkbox-wrapper > .byte-checkbox-mask").all()
+                checkboxes = await self.page.locator(".byte-checkbox-wrapper").all()
                 if len(checkboxes) > 0:
                     await checkboxes[0].click()
                     log("分类已选择")
             except Exception as e:
                 log(f"选择分类失败: {e}")
             
-            # 第9步：点击"预览并发布"
+            await asyncio.sleep(1)
+            
+            # 第7步：点击"预览并发布"
             log("点击'预览并发布'...")
-            try:
-                await self.page.get_by_role("button", name="预览并发布").click()
-                log("已点击'预览并发布'")
-            except Exception as e:
-                log(f"点击预览并发布失败: {e}")
+            preview_clicked = False
+            
+            preview_selectors = [
+                'button:has-text("预览并发布")',
+                'button:has-text("预览")',
+                '[class*="preview"]',
+                'div:has-text("预览并发布")',
+            ]
+            
+            for selector in preview_selectors:
+                try:
+                    btn = await self.page.wait_for_selector(selector, timeout=5000)
+                    if btn and await btn.is_visible():
+                        await btn.click()
+                        log(f"已点击'预览并发布': {selector}")
+                        preview_clicked = True
+                        await asyncio.sleep(3)
+                        break
+                except:
+                    continue
+            
+            if not preview_clicked:
+                # 尝试 JS
+                try:
+                    await self.page.evaluate("""
+                        const btns = document.querySelectorAll('button');
+                        for (const btn of btns) {
+                            if (btn.textContent.includes('预览') || btn.textContent.includes('发布')) {
+                                btn.click();
+                                break;
+                            }
+                        }
+                    """)
+                    log("通过 JS 点击预览")
+                    preview_clicked = True
+                    await asyncio.sleep(3)
+                except Exception as e:
+                    log(f"JS 点击预览失败: {e}")
+            
+            if not preview_clicked:
                 return ToolResult(success=False, error="找不到预览并发布按钮")
             
-            await asyncio.sleep(3)
-            
-            # 第10步：点击"确认发布"
+            # 第8步：点击"确认发布"
             log("点击'确认发布'...")
-            try:
-                await self.page.get_by_role("button", name="确认发布").click()
-                log("已点击'确认发布'")
-            except Exception as e:
-                log(f"点击确认发布失败: {e}")
-                # 备用：尝试其他按钮
-                try:
-                    await self.page.click('button:has-text("确认")', timeout=5000)
-                    log("已点击'确认'（备用）")
-                except:
-                    return ToolResult(success=False, error="找不到确认发布按钮")
+            confirm_clicked = False
             
-            # 第11步：等待发布完成
+            confirm_selectors = [
+                'button:has-text("确认发布")',
+                'button:has-text("确认")',
+                'button:has-text("发布")',
+                '.byte-btn-primary',
+                '[class*="confirm"]',
+                'div:has-text("确认发布")',
+            ]
+            
+            for selector in confirm_selectors:
+                try:
+                    btn = await self.page.wait_for_selector(selector, timeout=5000)
+                    if btn and await btn.is_visible():
+                        await btn.click()
+                        log(f"已点击确认按钮: {selector}")
+                        confirm_clicked = True
+                        await asyncio.sleep(5)
+                        break
+                except:
+                    continue
+            
+            if not confirm_clicked:
+                # 尝试 JS 点击所有可能的发布按钮
+                try:
+                    await self.page.evaluate("""
+                        const btns = document.querySelectorAll('button');
+                        for (const btn of btns) {
+                            const text = btn.textContent || '';
+                            if (text.includes('确认') || text.includes('发布') || text.includes('确定')) {
+                                btn.click();
+                                console.log('Clicked:', text);
+                            }
+                        }
+                    """)
+                    log("通过 JS 点击确认")
+                    confirm_clicked = True
+                    await asyncio.sleep(5)
+                except Exception as e:
+                    log(f"JS 点击确认失败: {e}")
+            
+            if not confirm_clicked:
+                return ToolResult(success=False, error="找不到确认发布按钮")
+            
+            # 第9步：等待发布完成并检查结果
             log("等待发布完成...")
             await asyncio.sleep(5)
             
             current_url = self.page.url
             log(f"发布后URL: {current_url}")
             
-            # 检查发布结果
-            if "/graphic/publish" in current_url or "/article" in current_url:
+            # 检查是否发布成功（URL变化或成功提示）
+            success_indicators = [
+                '/graphic/publish' in current_url,
+                '/article' in current_url,
+                '/content' in current_url,
+            ]
+            
+            if any(success_indicators):
                 log("发布成功")
                 return ToolResult(success=True, post_url=current_url)
             else:
-                return ToolResult(success=False, error="发布可能未完成，请检查")
+                # 截图查看当前状态
+                try:
+                    await self.page.screenshot(path="toutiao_final_state.png")
+                    log("已截图保存到 toutiao_final_state.png")
+                except:
+                    pass
+                return ToolResult(success=False, error="发布状态不确定，请检查浏览器")
             
         except Exception as e:
             log(f"头条号发布失败: {e}")
+            import traceback
+            log(traceback.format_exc())
             return ToolResult(success=False, error=str(e))
     
     async def check_status(self, post_id: str) -> ToolResult:
