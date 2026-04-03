@@ -1,11 +1,13 @@
 """
 百家号发布工具 - 使用文档导入功能
+基于 Playwright codegen 录制
 """
 
 import asyncio
 import json
 import os
 import logging
+import re
 from pathlib import Path
 from platforms.base import PlatformTool, ToolResult
 from rich.console import Console
@@ -77,35 +79,19 @@ class BaijiahaoTool(PlatformTool):
     async def is_logged_in(self) -> bool:
         """检查当前是否已登录"""
         try:
-            await self.page.goto("https://baijiahao.baidu.com/", wait_until="domcontentloaded")
+            await self.page.goto("https://baijiahao.baidu.com/builder/rc/home", wait_until="domcontentloaded")
             await asyncio.sleep(3)
             
             current_url = self.page.url
-            if "/login" in current_url or "/auth" in current_url:
+            if "/login" in current_url:
                 log(f"未登录，URL: {current_url}")
                 return False
             
-            # 检查是否有用户相关元素
-            user_selectors = [
-                '.user-info',
-                '.user-name',
-                '.avatar',
-                '[class*="user"]',
-            ]
-            for selector in user_selectors:
-                try:
-                    element = await self.page.query_selector(selector)
-                    if element and await element.is_visible():
-                        log(f"检测到登录状态，选择器: {selector}")
-                        return True
-                except:
-                    continue
-            
-            # 检查是否有创作入口
+            # 检查是否有发布入口
             try:
-                create_link = await self.page.wait_for_selector('a[href*="builder"], [class*="create"]', timeout=5000)
-                if create_link and await create_link.is_visible():
-                    log("检测到登录状态：有创作入口")
+                svg_elements = await self.page.locator("svg").count()
+                if svg_elements > 0:
+                    log(f"检测到页面加载，svg数量: {svg_elements}")
                     return True
             except:
                 pass
@@ -129,7 +115,14 @@ class BaijiahaoTool(PlatformTool):
             return True
         
         console.print("[yellow]未登录，请在浏览器中完成百家号登录...[/yellow]")
-        await self.page.goto("https://baijiahao.baidu.com/builder/author/register/index")
+        await self.page.goto("https://baijiahao.baidu.com/builder/theme/bjh/login")
+        
+        # 点击登录/注册按钮
+        try:
+            await self.page.get_by_role("button", name="登录/注册百家号").click()
+            log("已点击登录按钮")
+        except:
+            pass
         
         console.print("[cyan]等待登录完成（请在浏览器中操作）...[/cyan]")
         start_time = asyncio.get_event_loop().time()
@@ -150,29 +143,32 @@ class BaijiahaoTool(PlatformTool):
         console.print("\n[red]登录超时，请重试[/red]")
         return False
     
-    async def close_popup(self):
-        """关闭可能的弹窗"""
+    async def close_guide(self):
+        """关闭引导弹窗"""
+        guide_buttons = [
+            ("button", "我知道了"),
+            ("button", "下一步"),
+            ("button", "完成"),
+        ]
+        
+        for role, name in guide_buttons:
+            try:
+                btn = await self.page.get_by_role(role, name=name).first
+                if btn and await btn.is_visible():
+                    await btn.click()
+                    log(f"已点击: {name}")
+                    await asyncio.sleep(0.5)
+            except:
+                continue
+        
+        # 关闭其他可能的弹窗
         try:
-            close_selectors = [
-                '.close-btn',
-                '.modal-close',
-                '[class*="close"]',
-                'button:has-text("×")',
-                'button:has-text("关闭")',
-                '.ant-modal-close',
-            ]
-            for selector in close_selectors:
-                try:
-                    btn = await self.page.query_selector(selector)
-                    if btn and await btn.is_visible():
-                        await btn.click()
-                        log(f"已关闭弹窗: {selector}")
-                        await asyncio.sleep(0.5)
-                        return
-                except:
-                    continue
-        except Exception as e:
-            log(f"关闭弹窗时出错: {e}")
+            close_icon = await self.page.locator("[class*='close']").first
+            if close_icon and await close_icon.is_visible():
+                await close_icon.click()
+                log("已点击关闭图标")
+        except:
+            pass
     
     async def publish(self, article, file_path: str = None) -> ToolResult:
         """使用文档导入功能发布"""
@@ -181,81 +177,159 @@ class BaijiahaoTool(PlatformTool):
                 return ToolResult(success=False, error="登录失败")
         
         try:
-            # 优先使用传入的 file_path
             original_file = file_path or getattr(article, 'source_file', None)
-            article_title = getattr(article, 'title', '')
             
-            log("进入百家号创作页面...")
-            await self.page.goto("https://baijiahao.baidu.com/builder/rc/edit")
-            await self.page.wait_for_load_state("networkidle")
-            await asyncio.sleep(5)
+            if not original_file or not os.path.exists(original_file):
+                return ToolResult(success=False, error=f"找不到原始文件: {original_file}")
             
-            # 关闭可能的弹窗
-            log("关闭可能的弹窗...")
-            await self.close_popup()
+            log("进入百家号首页...")
+            await self.page.goto("https://baijiahao.baidu.com/builder/rc/home")
+            await asyncio.sleep(3)
+            
+            # 第1步：关闭可能的首页弹窗
+            try:
+                close_btn = await self.page.locator("._7c78f7c013adb338-closeIcon").first
+                if close_btn and await close_btn.is_visible():
+                    await close_btn.click()
+                    log("已关闭首页弹窗")
+                    await asyncio.sleep(0.5)
+            except:
+                pass
+            
+            # 第2步：点击发布图文（通过svg图标）
+            log("点击'发布图文'...")
+            try:
+                await self.page.locator("svg").nth(5).click()
+                log("已点击发布图文")
+            except Exception as e:
+                log(f"点击svg失败: {e}")
+                # 备用：尝试其他方式
+                try:
+                    await self.page.goto("https://baijiahao.baidu.com/builder/rc/edit")
+                    log("直接访问编辑页面")
+                except:
+                    return ToolResult(success=False, error="无法进入编辑页面")
+            
+            await asyncio.sleep(3)
+            
+            # 第3步：关闭引导弹窗
+            log("关闭引导弹窗...")
+            await self.close_guide()
             await asyncio.sleep(1)
             
-            # 如果有原始文件，尝试文档导入
-            if original_file and os.path.exists(original_file):
-                log(f"尝试文档导入: {original_file}")
-                import_success = await self._import_document(original_file)
-                if not import_success:
-                    log("文档导入失败，尝试手动填写")
-                    await self._fill_content_manually(article)
-            else:
-                await self._fill_content_manually(article)
+            # 第4步：点击"插入" -> "导入文档"
+            log("点击'插入' -> '导入文档'...")
+            try:
+                await self.page.get_by_text("插入").first.click()
+                await asyncio.sleep(1)
+                await self.page.get_by_text("导入文档").click()
+                log("已点击导入文档")
+            except Exception as e:
+                log(f"点击导入文档失败: {e}")
+                return ToolResult(success=False, error="找不到导入文档入口")
             
             await asyncio.sleep(2)
             
-            # 填写标题
-            if article_title:
-                log(f"填写标题: {article_title}")
-                await self._fill_title(article_title)
+            # 第5步：选择文档并上传
+            log(f"选择文档: {original_file}")
+            try:
+                await self.page.get_by_role("button", name="选择文档").click()
+                await asyncio.sleep(1)
+                
+                file_input = await self.page.wait_for_selector('input[type="file"]', timeout=10000)
+                await file_input.set_input_files(original_file)
+                log("文件已上传")
+            except Exception as e:
+                log(f"上传文件失败: {e}")
+                return ToolResult(success=False, error=f"上传文件失败: {e}")
+            
+            await asyncio.sleep(5)  # 等待导入完成
+            
+            # 第6步：点击"全部采纳"
+            log("点击'全部采纳'...")
+            try:
+                await self.page.get_by_role("button", name="全部采纳").click()
+                log("已点击全部采纳")
+            except Exception as e:
+                log(f"点击全部采纳失败: {e}")
+            
+            await asyncio.sleep(2)
+            
+            # 第7步：选择封面模式（三图）
+            log("选择三图封面模式...")
+            try:
+                await self.page.get_by_text("三图").click()
+                log("已选择三图")
+            except Exception as e:
+                log(f"选择三图失败: {e}")
             
             await asyncio.sleep(1)
             
-            # 选择分类
-            log("选择分类...")
-            await self._select_category()
+            # 第8步：选择封面图片
+            log("选择封面图片...")
+            try:
+                # 点击选择封面
+                await self.page.locator("div").filter(has_text=re.compile(r"^选择封面$")).nth(4).click()
+                await asyncio.sleep(1)
+                
+                # 选择第2张和第3张图片
+                try:
+                    checkbox1 = await self.page.locator("div:nth-child(2) > .e8c90bfac9d4eab4-checkbox").first
+                    if checkbox1:
+                        await checkbox1.click()
+                        log("已选择第1张封面")
+                except:
+                    pass
+                
+                try:
+                    img2 = await self.page.locator("div:nth-child(3) > .e8c90bfac9d4eab4-imgWrapper > .e8c90bfac9d4eab4-img").first
+                    if img2:
+                        await img2.click()
+                        log("已选择第2张封面")
+                except:
+                    pass
+                
+                # 点击确定
+                await self.page.get_by_role("button", name=re.compile(r"确定 \(\d+\)")).click()
+                log("封面已确定")
+            except Exception as e:
+                log(f"选择封面失败: {e}")
             
-            await asyncio.sleep(1)
+            await asyncio.sleep(2)
             
-            # 点击发布
+            # 第9步：点击发布
             log("点击发布...")
-            publish_success = await self._click_publish()
+            try:
+                await self.page.get_by_test_id("publish-btn").click()
+                log("已点击发布")
+            except Exception as e:
+                log(f"点击发布按钮失败: {e}")
+                # 备用
+                try:
+                    await self.page.get_by_role("button", name="发布").click()
+                    log("已点击发布（备用）")
+                except:
+                    return ToolResult(success=False, error="找不到发布按钮")
             
-            if not publish_success:
-                return ToolResult(success=False, error="找不到发布按钮")
-            
-            # 等待发布完成
-            log("等待发布完成...")
             await asyncio.sleep(5)
             
+            # 第10步：检查结果
             current_url = self.page.url
             log(f"发布后URL: {current_url}")
             
-            # 检查是否发布成功
-            success_indicators = [
-                '/builder' in current_url,
-                '/article' in current_url,
-                'id=' in current_url,
-            ]
+            # 提取文章ID
+            article_id = None
+            match = re.search(r'[?&]id=([^&]+)', current_url)
+            if match:
+                article_id = match.group(1)
             
-            if any(success_indicators):
+            if "/builder" in current_url or article_id:
                 log("发布成功")
-                # 尝试提取文章ID
-                import re
-                article_id = None
-                match = re.search(r'[?&]id=([^&]+)', current_url)
-                if match:
-                    article_id = match.group(1)
-                
                 return ToolResult(success=True, post_id=article_id, post_url=current_url)
             else:
-                # 截图查看状态
                 try:
-                    await self.page.screenshot(path="baijiahao_final_state.png")
-                    log("已截图保存到 baijiahao_final_state.png")
+                    await self.page.screenshot(path="baijiahao_final.png")
+                    log("已截图保存")
                 except:
                     pass
                 return ToolResult(success=False, error="发布状态不确定")
@@ -265,215 +339,6 @@ class BaijiahaoTool(PlatformTool):
             import traceback
             log(traceback.format_exc())
             return ToolResult(success=False, error=str(e))
-    
-    async def _import_document(self, file_path: str) -> bool:
-        """尝试导入文档"""
-        try:
-            # 查找导入文档按钮
-            import_selectors = [
-                'button:has-text("导入")',
-                'button:has-text("文档")',
-                '[class*="import"]',
-                '[class*="upload"]',
-            ]
-            
-            for selector in import_selectors:
-                try:
-                    btn = await self.page.wait_for_selector(selector, timeout=3000)
-                    if btn and await btn.is_visible():
-                        await btn.click()
-                        log(f"已点击导入按钮: {selector}")
-                        await asyncio.sleep(2)
-                        break
-                except:
-                    continue
-            else:
-                log("未找到导入按钮，尝试直接上传文件")
-            
-            # 查找文件输入框
-            file_input = await self.page.wait_for_selector('input[type="file"]', timeout=5000)
-            await file_input.set_input_files(file_path)
-            log("文件已上传，等待导入...")
-            
-            await asyncio.sleep(8)  # 等待文档导入
-            return True
-            
-        except Exception as e:
-            log(f"导入文档失败: {e}")
-            return False
-    
-    async def _fill_content_manually(self, article):
-        """手动填写内容"""
-        try:
-            html_content = getattr(article, 'html_content', '')
-            content = getattr(article, 'content', '')
-            
-            # 查找编辑器
-            editor_selectors = [
-                '[contenteditable="true"]',
-                '.editor-content',
-                '.ProseMirror',
-                '#ueditor_0',
-                '[class*="editor"]',
-            ]
-            
-            for selector in editor_selectors:
-                try:
-                    editor = await self.page.wait_for_selector(selector, timeout=3000)
-                    if editor and await editor.is_visible():
-                        await editor.click()
-                        await self.page.keyboard.press('Control+a')
-                        await self.page.keyboard.press('Delete')
-                        
-                        # 输入HTML内容
-                        safe_html = html_content.replace('`', '\`').replace('${', '\${')
-                        await self.page.evaluate(f"""
-                            const editor = document.querySelector('{selector}');
-                            if (editor) {{
-                                editor.innerHTML = `{safe_html}`;
-                            }}
-                        """)
-                        log(f"内容已填写 via {selector}")
-                        return
-                except:
-                    continue
-            
-            log("未找到编辑器")
-        except Exception as e:
-            log(f"手动填写内容失败: {e}")
-    
-    async def _fill_title(self, title: str):
-        """填写标题"""
-        try:
-            title_selectors = [
-                'input[placeholder*="标题"]',
-                'textarea[placeholder*="标题"]',
-                '[class*="title"] input',
-                '[class*="title"] textarea',
-            ]
-            
-            for selector in title_selectors:
-                try:
-                    title_input = await self.page.wait_for_selector(selector, timeout=3000)
-                    if title_input and await title_input.is_visible():
-                        await title_input.fill(title)
-                        log(f"标题已填写 via {selector}")
-                        return
-                except:
-                    continue
-            
-            # JS 备用方案
-            await self.page.evaluate(f"""
-                const inputs = document.querySelectorAll('input, textarea');
-                for (const input of inputs) {{
-                    if (input.placeholder && input.placeholder.includes('标题')) {{
-                        input.value = '{title}';
-                        input.dispatchEvent(new Event('input', {{ bubbles: true }}));
-                        break;
-                    }}
-                }}
-            """)
-            log("标题已通过 JS 填写")
-        except Exception as e:
-            log(f"填写标题失败: {e}")
-    
-    async def _select_category(self):
-        """选择分类"""
-        try:
-            # 尝试点击分类选择器
-            category_selectors = [
-                '.category-select',
-                '[class*="category"]',
-                'button:has-text("分类")',
-            ]
-            
-            for selector in category_selectors:
-                try:
-                    btn = await self.page.wait_for_selector(selector, timeout=3000)
-                    if btn and await btn.is_visible():
-                        await btn.click()
-                        await asyncio.sleep(1)
-                        
-                        # 选择第一个选项
-                        option_selectors = [
-                            '.category-item',
-                            '.dropdown-item',
-                            '[class*="option"]',
-                            'li',
-                        ]
-                        
-                        for opt_selector in option_selectors:
-                            try:
-                                option = await self.page.wait_for_selector(opt_selector, timeout=2000)
-                                if option:
-                                    await option.click()
-                                    log("分类已选择")
-                                    return
-                            except:
-                                continue
-                except:
-                    continue
-            
-            log("未找到分类选择器或已默认")
-        except Exception as e:
-            log(f"选择分类失败: {e}")
-    
-    async def _click_publish(self) -> bool:
-        """点击发布按钮"""
-        try:
-            publish_selectors = [
-                'button:has-text("发布")',
-                'button:has-text("立即发布")',
-                '[class*="publish"]',
-                '.ant-btn-primary',
-            ]
-            
-            for selector in publish_selectors:
-                try:
-                    btn = await self.page.wait_for_selector(selector, timeout=5000)
-                    if btn and await btn.is_visible():
-                        await btn.click()
-                        log(f"已点击发布按钮: {selector}")
-                        await asyncio.sleep(3)
-                        
-                        # 处理确认弹窗
-                        confirm_selectors = [
-                            'button:has-text("确认")',
-                            'button:has-text("确定")',
-                            '.ant-btn-primary',
-                        ]
-                        
-                        for confirm_selector in confirm_selectors:
-                            try:
-                                confirm_btn = await self.page.wait_for_selector(confirm_selector, timeout=3000)
-                                if confirm_btn and await confirm_btn.is_visible():
-                                    await confirm_btn.click()
-                                    log("已点击确认")
-                                    await asyncio.sleep(2)
-                                    break
-                            except:
-                                continue
-                        
-                        return True
-                except:
-                    continue
-            
-            # JS 备用
-            await self.page.evaluate("""
-                const btns = document.querySelectorAll('button');
-                for (const btn of btns) {
-                    if (btn.textContent.includes('发布') || btn.textContent.includes('确认')) {
-                        btn.click();
-                    }
-                }
-            """)
-            log("通过 JS 点击发布")
-            await asyncio.sleep(3)
-            return True
-            
-        except Exception as e:
-            log(f"点击发布失败: {e}")
-            return False
     
     async def check_status(self, post_id: str) -> ToolResult:
         """检查文章状态"""
