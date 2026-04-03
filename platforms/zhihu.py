@@ -139,7 +139,6 @@ class ZhihuTool(PlatformTool):
             log(f"点击文件行来选中: {file_name}")
             
             try:
-                # 找到包含文件名的行并点击
                 file_row = await self.page.wait_for_selector(
                     f'.Modal :has-text("{file_name}")',
                     timeout=10000
@@ -148,7 +147,6 @@ class ZhihuTool(PlatformTool):
                 log("已点击文件行")
             except Exception as e:
                 log(f"点击文件行失败: {e}")
-                # 备用：点击文件左侧区域
                 try:
                     file_locator = self.page.locator('.Modal').locator(f'text={file_name}')
                     box = await file_locator.bounding_box()
@@ -164,9 +162,8 @@ class ZhihuTool(PlatformTool):
             log("等待'请选择文件'按钮变成可用...")
             
             confirm_btn = None
-            for attempt in range(30):  # 最多等待30秒
+            for attempt in range(30):
                 try:
-                    # 查找包含"请选择文件"文字的div，且不是禁用状态
                     btn = await self.page.query_selector(
                         '.Modal div:has-text("请选择文件")[aria-disabled="false"], '
                         '.Modal div:has-text("请选择文件"):not([aria-disabled="true"])'
@@ -179,12 +176,10 @@ class ZhihuTool(PlatformTool):
                         log(f"第{attempt+1}秒: 按钮还未可用...")
                 except Exception as e:
                     log(f"第{attempt+1}秒: 检查失败 {e}")
-                
                 await asyncio.sleep(1)
             
             if not confirm_btn:
                 log("30秒内按钮未变成可用状态，尝试直接找文字")
-                # 备用：直接找包含文字的div
                 try:
                     confirm_btn = await self.page.wait_for_selector(
                         '.Modal div:has-text("请选择文件")',
@@ -194,29 +189,33 @@ class ZhihuTool(PlatformTool):
                     pass
             
             if confirm_btn:
+                # 先用JavaScript点击（更可靠）
                 try:
-                    await confirm_btn.click()
-                    log("已点击'请选择文件'按钮")
+                    log("尝试JavaScript点击按钮...")
+                    await confirm_btn.evaluate('el => el.click()')
+                    log("已用JavaScript点击'请选择文件'按钮")
                 except Exception as e:
-                    log(f"点击失败: {e}，尝试JavaScript点击...")
+                    log(f"JavaScript点击失败: {e}，尝试普通点击...")
                     try:
-                        await confirm_btn.evaluate('el => el.click()')
-                        log("已用JavaScript点击按钮")
+                        await confirm_btn.click()
+                        log("已点击'请选择文件'按钮")
                     except Exception as e2:
-                        log(f"JavaScript点击也失败: {e2}")
+                        log(f"普通点击也失败: {e2}")
                         return ToolResult(success=False, error="无法点击确认按钮")
             else:
                 log("没找到'请选择文件'按钮")
                 return ToolResult(success=False, error="找不到确认按钮")
             
-            # 第6步：等待导入完成
-            log("等待弹窗消失（导入完成）...")
+            # 第6步：等待导入完成 - 增加等待时间
+            log("等待弹窗消失（导入完成），最多等60秒...")
             try:
                 await self.page.wait_for_selector('.Modal', state='hidden', timeout=60000)
                 log("弹窗已消失，导入完成")
             except:
-                log("弹窗未自动消失，等待30秒后继续")
-                await asyncio.sleep(30)
+                log("60秒后弹窗仍未消失，尝试检查编辑器内容...")
+            
+            # 不管弹窗有没有消失，都等待一下然后检查编辑器
+            await asyncio.sleep(5)
             
             # 第7步：检查编辑器是否有内容
             log("检查编辑器内容...")
@@ -227,9 +226,17 @@ class ZhihuTool(PlatformTool):
                 )
                 title_value = await title_input.input_value()
                 log(f"编辑器标题: '{title_value}'")
+                
+                # 如果标题为空，再等一会儿再检查
                 if not title_value or not title_value.strip():
-                    log("标题为空，文档导入失败")
-                    return ToolResult(success=False, error="文档导入失败，标题为空")
+                    log("标题为空，等待10秒后再次检查...")
+                    await asyncio.sleep(10)
+                    title_value = await title_input.input_value()
+                    log(f"再次检查编辑器标题: '{title_value}'")
+                    
+                    if not title_value or not title_value.strip():
+                        log("标题仍为空，文档导入失败")
+                        return ToolResult(success=False, error="文档导入失败，标题为空")
             except Exception as e:
                 log(f"检查编辑器失败: {e}")
                 return ToolResult(success=False, error=f"检查编辑器失败: {e}")
@@ -246,7 +253,6 @@ class ZhihuTool(PlatformTool):
             
             await asyncio.sleep(3)
             
-            # 确认弹窗
             try:
                 publish_buttons = await self.page.query_selector_all('button:has-text("发布")')
                 if len(publish_buttons) >= 2:
@@ -255,7 +261,6 @@ class ZhihuTool(PlatformTool):
             except:
                 pass
             
-            # 等待跳转
             log("等待页面跳转...")
             try:
                 await self.page.wait_for_url("**/p/**", timeout=60000)
