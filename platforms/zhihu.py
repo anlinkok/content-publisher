@@ -125,36 +125,31 @@ class ZhihuTool(PlatformTool):
             logger.info("等待文件选择弹窗...")
             await asyncio.sleep(3)
             
-            # 方法1: 尝试直接找到文件input（隐藏）
+            # 检查是否有已上传的文件在列表中（需要点击圆圈选中）
             try:
-                # 找到接受 .docx 的文件输入框
-                file_inputs = await self.page.query_selector_all('input[type="file"]')
-                file_input = None
-                for inp in file_inputs:
-                    accept = await inp.get_attribute('accept')
-                    if accept and '.docx' in accept:
-                        file_input = inp
-                        break
+                # 查找文件列表中的复选框/圆圈
+                file_items = await self.page.query_selector_all('.FileItem, [class*="file-item"], .upload-item')
+                if file_items:
+                    logger.info(f"发现 {len(file_items)} 个文件项")
+                    # 点击第一个文件的圆圈/复选框
+                    checkbox = await file_items[0].query_selector('.checkbox, [class*="checkbox"], [class*="radio"]')
+                    if checkbox:
+                        await checkbox.click()
+                        logger.info("已选中文件")
+                        await asyncio.sleep(1)
                 
-                if file_input:
-                    logger.info(f"直接上传文件: {original_file}")
-                    await file_input.set_input_files(original_file)
-                else:
-                    # 方法2: 点击弹窗里的"请选择文件"按钮
-                    logger.info("点击弹窗里的选择文件按钮...")
-                    select_btn = await self.page.wait_for_selector(
-                        'button:has-text("请选择文件"), .Upload-select-btn',
-                        timeout=10000
-                    )
-                    await select_btn.click()
-                    await asyncio.sleep(2)
-                    
-                    # 等待文件输入框出现
-                    file_input = await self.page.wait_for_selector('input[type="file"]', timeout=10000)
-                    await file_input.set_input_files(original_file)
+                # 点击"请选择文件"按钮确认
+                select_btn = await self.page.wait_for_selector(
+                    'button:has-text("请选择文件"), .Upload-select-btn, [class*="select-file"]',
+                    timeout=10000
+                )
+                await select_btn.click()
+                logger.info("已点击请选择文件按钮")
             except Exception as e:
-                logger.error(f"文件上传失败: {e}")
-                raise
+                logger.warning(f"文件选择流程失败，尝试直接上传: {e}")
+                # 备选方案：直接找到文件input上传
+                file_input = await self.page.wait_for_selector('input[type="file"]', timeout=10000)
+                await file_input.set_input_files(original_file)
             
             # 等待导入完成
             logger.info("等待文档导入完成...")
