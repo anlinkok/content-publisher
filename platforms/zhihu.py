@@ -66,12 +66,26 @@ class ZhihuTool(PlatformTool):
             # 填写内容
             content_editor = await self.page.wait_for_selector('.DraftEditor-root')
             await content_editor.click()
+            await asyncio.sleep(1)
             
-            # 输入HTML内容
-            safe_html = article.html_content.replace('`', '\\`')
-            await self.page.evaluate(f"""
-                document.querySelector('.DraftEditor-root').innerHTML = `<div class=\"DraftEditor-editorContainer\"><div contenteditable=\"true\" class=\"public-DraftEditor-content\">{safe_html}</div></div>`;
-            """)
+            # 清除现有内容
+            await self.page.keyboard.press('Control+a')
+            await self.page.keyboard.press('Delete')
+            await asyncio.sleep(0.5)
+            
+            # 输入纯文本内容（去掉HTML标签）
+            import re
+            text_content = re.sub(r'<[^>]+>', '', article.html_content)
+            text_content = text_content.replace('&nbsp;', ' ').replace('&lt;', '<').replace('&gt;', '>').replace('&amp;', '&')
+            
+            # 分段输入
+            paragraphs = text_content.split('\n\n')
+            for i, para in enumerate(paragraphs):
+                if para.strip():
+                    await self.page.keyboard.type(para.strip())
+                    if i < len(paragraphs) - 1:
+                        await self.page.keyboard.press('Enter')
+                        await self.page.keyboard.press('Enter')
             
             await asyncio.sleep(2)
             
