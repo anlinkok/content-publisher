@@ -226,6 +226,45 @@ class BaijiahaoTool(PlatformTool):
             
             await asyncio.sleep(2)
             
+            # === 插入商品（按录制代码）===
+            log("插入商品...")
+            try:
+                # 点击商品图标
+                await self.page.locator(".l-icon.l-icon-BjhBasicShanpin > svg").click()
+                log("已点击商品图标")
+                await asyncio.sleep(2)
+                
+                # 在 iframe 中选择商品
+                goods_frame = self.page.locator("#goods_iframepc_goods_component1").content_frame
+                
+                # 添加第一个商品
+                await goods_frame.get_by_text("添加").first.click()
+                await asyncio.sleep(1)
+                await goods_frame.get_by_role("button", name="添 加").click()
+                log("已添加第一个商品")
+                await asyncio.sleep(1)
+                
+                # 关闭商品选择弹窗
+                await self.page.locator("div:nth-child(2) > ._9d63bce81e3a0b19-icon").first.click()
+                log("已关闭商品选择")
+                await asyncio.sleep(1)
+                
+                # 再添加第二个（可选）
+                # await goods_frame.get_by_text("添加").nth(1).click()
+                # await goods_frame.get_by_role("button", name="添 加").click()
+                
+                # 关闭商品面板
+                await self.page.locator("._73a3a52aab7e3a36-icon").click()
+                log("已关闭商品面板")
+                await asyncio.sleep(1)
+                
+                # 确认商品选择
+                await self.page.get_by_role("button", name=re.compile(r"确定 \(\d+\)")).click()
+                log("已确认商品")
+                await asyncio.sleep(1)
+            except Exception as e:
+                log(f"插入商品失败或跳过: {e}")
+            
             # 选择单图封面
             log("选择单图封面...")
             try:
