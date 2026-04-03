@@ -262,23 +262,22 @@ class BaijiahaoTool(PlatformTool):
                 log("已添加第一个商品")
                 await asyncio.sleep(1)
                 
+                # 添加第二个商品（在同一个iframe内）
+                try:
+                    await goods_frame.get_by_text("添加").nth(1).click()
+                    await asyncio.sleep(1)
+                    await goods_frame.get_by_role("button", name="添 加").click()
+                    log("已添加第二个商品")
+                    await asyncio.sleep(1)
+                except Exception as e2:
+                    log(f"添加第二个商品失败: {e2}")
+                
                 # 关闭商品选择（点击圆圈）
                 try:
                     await self.page.locator("#edui41_state circle").click()
                     log("已关闭商品选择")
                 except:
                     pass
-                await asyncio.sleep(1)
-                
-                # 添加第二个商品
-                try:
-                    await goods_frame.get_by_text("添加").nth(1).click()
-                    await asyncio.sleep(1)
-                    await goods_frame.get_by_role("button", name="添 加").click()
-                    log("已添加第二个商品")
-                except:
-                    log("添加第二个商品失败或只有一个")
-                
                 await asyncio.sleep(1)
             except Exception as e:
                 log(f"插入商品失败: {e}")
