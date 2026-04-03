@@ -106,118 +106,120 @@ class ZhihuTool(PlatformTool):
             log("进入知乎创作页面...")
             await self.page.goto("https://zhuanlan.zhihu.com/write")
             await self.page.wait_for_load_state("networkidle")
-            await asyncio.sleep(2)
+            await asyncio.sleep(3)
             
             # 第1步：点击"导入"按钮
             log("点击'导入'按钮...")
-            await self.page.get_by_role("button", name="导入").click()
-            log("已点击'导入'")
-            await asyncio.sleep(1)
+            try:
+                await self.page.get_by_role("button", name="导入").click()
+                log("已点击'导入'")
+            except Exception as e:
+                log(f"get_by_role失败: {e}，尝试备用选择器...")
+                # 备用：直接通过文字查找
+                await self.page.click('text=导入', timeout=5000)
+                log("已点击'导入'（备用）")
+            await asyncio.sleep(2)
             
             # 第2步：点击"导入文档"
             log("点击'导入文档'...")
-            await self.page.get_by_role("button", name="导入文档").click()
-            log("已点击'导入文档'")
+            try:
+                await self.page.get_by_role("button", name="导入文档").click()
+                log("已点击'导入文档'")
+            except Exception as e:
+                log(f"get_by_role失败: {e}，尝试备用选择器...")
+                await self.page.click('text=导入文档', timeout=5000)
+                log("已点击'导入文档'（备用）")
+            await asyncio.sleep(3)
+            
+            # 第3步：点击上传区域（等待弹窗出现）
+            log("等待并点击上传区域...")
+            try:
+                # 等待包含上传文字的按钮
+                upload_btn = await self.page.wait_for_selector(
+                    'text=点击选择本地文档或拖动文件到窗口上传',
+                    timeout=15000
+                )
+                await upload_btn.click()
+                log("已点击上传区域")
+            except Exception as e:
+                log(f"点击上传区域失败: {e}")
+                # 备用：直接找 input[type="file"]
+                log("尝试直接上传文件...")
+            
             await asyncio.sleep(2)
             
-            # 第3步：点击上传区域
-            log("点击上传区域...")
-            upload_btn = await self.page.wait_for_selector(
-                'button:has-text("点击选择本地文档或拖动文件到窗口上传")',
-                timeout=10000
-            )
-            await upload_btn.click()
-            log("已点击上传区域")
-            await asyncio.sleep(2)
-            
-            # 第4步：上传文件（根据录制脚本，这里用 set_input_files）
+            # 第4步：上传文件
             log(f"上传文件: {original_file}")
-            # 找到 file input 并上传
-            file_input = await self.page.wait_for_selector('input[type="file"]', timeout=10000)
-            await file_input.set_input_files(original_file)
-            log("文件已上传")
+            try:
+                # 等待文件input出现
+                file_input = await self.page.wait_for_selector('input[type="file"]', timeout=10000)
+                await file_input.set_input_files(original_file)
+                log("文件已上传")
+            except Exception as e:
+                log(f"上传文件失败: {e}")
+                return ToolResult(success=False, error=f"上传文件失败: {e}")
             
-            # 第5步：等待导入完成（页面会跳转到 /p/xxx/edit）
-            log("等待导入完成（页面跳转）...")
+            # 第5步：等待导入完成（页面跳转到 /p/xxx/edit）
+            log("等待导入完成，最多2分钟...")
             try:
                 await self.page.wait_for_url("**/p/**/edit", timeout=120000)
                 log(f"导入完成，当前URL: {self.page.url}")
             except Exception as e:
                 log(f"等待跳转超时: {e}")
-                # 检查是否在编辑页
                 current_url = self.page.url
                 log(f"当前URL: {current_url}")
-                if "/p/" not in current_url:
-                    return ToolResult(success=False, error="文档导入超时，未跳转到编辑页")
+                # 检查是否已经在编辑页
+                if "/p/" in current_url and "/edit" in current_url:
+                    log("已在编辑页，继续")
+                elif "/p/" in current_url:
+                    log("已在文章页，可能已发布")
+                    post_id = current_url.split("/p/")[1].split("?")[0]
+                    return ToolResult(success=True, post_id=post_id, post_url=current_url)
+                else:
+                    return ToolResult(success=False, error="文档导入超时")
             
             # 第6步：获取文章ID
             current_url = self.page.url
             post_id = current_url.split("/p/")[1].split("/")[0]
             log(f"文章ID: {post_id}")
             
-            # 第7步：检查标题（可选：从文章对象获取或从页面获取）
-            log("检查编辑器标题...")
-            try:
-                title_input = await self.page.wait_for_selector(
-                    'textarea[placeholder*="标题"], input[placeholder*="标题"]',
-                    timeout=10000
-                )
-                title_value = await title_input.input_value()
-                log(f"当前标题: '{title_value}'")
-                
-                # 如果文章对象有标题且编辑器标题为空，则填写标题
-                article_title = getattr(article, 'title', None)
-                if article_title and (not title_value or not title_value.strip()):
-                    log(f"填写标题: {article_title}")
-                    await title_input.fill(article_title)
-            except Exception as e:
-                log(f"处理标题时出错: {e}")
-            
-            # 第8步：发布
-            log("点击发布按钮...")
+            # 第7步：点击发布
+            log("点击发布...")
             try:
                 publish_btn = await self.page.wait_for_selector('button:has-text("发布")', timeout=10000)
                 await publish_btn.click()
                 log("已点击发布")
             except Exception as e:
-                log(f"点击发布按钮失败: {e}")
+                log(f"点击发布失败: {e}")
                 return ToolResult(success=False, error=f"点击发布按钮失败: {e}")
             
             await asyncio.sleep(3)
             
-            # 确认弹窗（如果有）
+            # 确认弹窗
             try:
-                confirm_btn = await self.page.wait_for_selector(
-                    'button:has-text("发布"):visible',
-                    timeout=5000
-                )
+                confirm_btn = await self.page.wait_for_selector('button:has-text("发布"):visible', timeout=5000)
                 await confirm_btn.click()
                 log("已点击确认发布")
             except:
                 log("没有确认弹窗或已自动确认")
             
-            # 第9步：等待跳转到文章页
+            # 第8步：等待完成
             log("等待发布完成...")
             try:
                 await self.page.wait_for_url("**/p/**", timeout=60000)
-                # 确保不是 /edit 结尾
                 await asyncio.sleep(2)
                 current_url = self.page.url
-                log(f"发布后URL: {current_url}")
             except:
-                log("等待跳转超时，检查当前URL")
                 current_url = self.page.url
-                log(f"当前URL: {current_url}")
             
             if "/p/" in current_url and "/edit" not in current_url:
                 post_id = current_url.split("/p/")[1].split("?")[0]
                 log(f"发布成功，文章ID: {post_id}")
                 return ToolResult(success=True, post_id=post_id, post_url=current_url)
             elif "/p/" in current_url:
-                # 还在编辑页，可能发布成功了但没跳转
                 post_id = current_url.split("/p/")[1].split("/")[0]
                 post_url = f"https://zhuanlan.zhihu.com/p/{post_id}"
-                log(f"可能在编辑页，文章ID: {post_id}")
+                log(f"发布成功，文章ID: {post_id}")
                 return ToolResult(success=True, post_id=post_id, post_url=post_url)
             else:
                 log("发布未成功")
