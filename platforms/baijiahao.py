@@ -189,13 +189,18 @@ class BaijiahaoTool(PlatformTool):
             log("已点击'导入文档'")
             await asyncio.sleep(2)
             
-            # 上传文件
+            # 上传文件（直接操作input，避免系统弹窗）
             log(f"上传文件: {original_file}")
             try:
-                await self.page.get_by_role("button", name="选择文档").click()
-                await asyncio.sleep(1)
-                await self.page.get_by_role("button", name="选择文档").set_input_files(original_file)
-                log("文件已上传")
+                # 直接找 file input 设置文件，不点击"选择文档"按钮
+                file_inputs = await self.page.locator('input[type="file"]').all()
+                for inp in file_inputs:
+                    accept = await inp.get_attribute('accept') or ''
+                    if 'video' not in accept and ('doc' in accept or 'word' in accept or accept == ''):
+                        await inp.set_input_files(original_file)
+                        log("文件已上传")
+                        break
+                await asyncio.sleep(2)  # 等待系统弹窗关闭
             except Exception as e:
                 log(f"上传失败: {e}")
                 return ToolResult(success=False, error=f"上传失败: {e}")
