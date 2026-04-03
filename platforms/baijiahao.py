@@ -217,26 +217,57 @@ class BaijiahaoTool(PlatformTool):
             await self.close_guide()
             await asyncio.sleep(1)
             
-            # 第4步：鼠标悬停"插入"展开菜单，然后点击"导入文档"
-            log("鼠标悬停'插入'展开菜单...")
+            # 第4步：直接点击"导入文档"（不经过插入菜单）
+            log("点击'导入文档'...")
+            import_success = False
+            
+            # 尝试1：直接找"导入文档"按钮/链接
             try:
-                # 先找到"插入"按钮并悬停
-                insert_btn = await self.page.get_by_text("插入").first
-                await insert_btn.hover()
-                log("已悬停'插入'")
-                await asyncio.sleep(1)
-                
-                # 点击"导入文档"
                 await self.page.get_by_text("导入文档").click()
-                log("已点击导入文档")
+                log("已直接点击导入文档")
+                import_success = True
             except Exception as e:
-                log(f"悬停插入失败: {e}")
-                # 备用：尝试直接点击
+                log(f"直接点击导入文档失败: {e}")
+            
+            # 尝试2：尝试通过locator定位
+            if not import_success:
                 try:
+                    await self.page.locator('text=导入文档').click()
+                    log("已通过locator点击导入文档")
+                    import_success = True
+                except Exception as e:
+                    log(f"locator点击失败: {e}")
+            
+            # 尝试3：悬停"插入"展开菜单
+            if not import_success:
+                try:
+                    log("尝试悬停'插入'菜单...")
+                    insert_btn = await self.page.get_by_text("插入").first
+                    await insert_btn.hover()
+                    log("已悬停'插入'")
+                    await asyncio.sleep(1)
                     await self.page.get_by_text("导入文档").click()
-                    log("已直接点击导入文档")
-                except:
-                    return ToolResult(success=False, error="找不到导入文档入口")
+                    log("已点击导入文档（通过悬停）")
+                    import_success = True
+                except Exception as e:
+                    log(f"悬停插入失败: {e}")
+            
+            # 尝试4：JavaScript强制点击
+            if not import_success:
+                try:
+                    await self.page.evaluate("""
+                        const btn = document.querySelector('button:contains(导入文档)') || 
+                                   document.querySelector('[class*="import"]') ||
+                                   Array.from(document.querySelectorAll('*')).find(el => el.textContent.includes('导入文档'));
+                        if (btn) btn.click();
+                    """)
+                    log("已通过JS点击导入文档")
+                    import_success = True
+                except Exception as e:
+                    log(f"JS点击失败: {e}")
+            
+            if not import_success:
+                return ToolResult(success=False, error="找不到导入文档入口")
             
             await asyncio.sleep(2)
             
