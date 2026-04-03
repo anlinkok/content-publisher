@@ -237,7 +237,7 @@ class BaijiahaoTool(PlatformTool):
                 log("已点击发布")
             except:
                 # 备用：JS点击
-                await self.page.evaluate('document.querySelector("[data-testid=\\'publish-btn\\']").click()')
+                await self.page.evaluate("document.querySelector('[data-testid=\"publish-btn\"]').click()")
                 log("已通过JS点击发布")
             
             await asyncio.sleep(5)
