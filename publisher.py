@@ -118,8 +118,8 @@ class ArticleManager:
             
             console.print(f"[green]✓ 提取了 {len(saved_images)} 张图片[/green]")
             
-            # 如果没有在内容中指定平台，使用默认平台
-            platforms = word_content.tags if word_content.tags else ['zhihu', 'toutiao']
+            # 默认平台：知乎（Word文档不指定平台）
+            platforms = ['zhihu']
             
             return Article(
                 title=word_content.title,
