@@ -133,25 +133,21 @@ class ZhihuTool(PlatformTool):
             await self.page.wait_for_selector('.Modal', timeout=15000)
             log("弹窗已出现")
             
-            # 等待弹窗完全加载
-            log("等待10秒让弹窗完全加载...")
-            await asyncio.sleep(10)
+            # 等待更长时间让弹窗内容加载
+            log("等待15秒让弹窗完全加载...")
+            await asyncio.sleep(15)
             
             # 第4步：点击文件前面的圆圈/复选框来选中
             file_name = os.path.basename(original_file)
             log(f"尝试选中文件: {file_name}")
             
             try:
-                # 先找到文件所在行，然后找前面的圆圈
                 file_row = self.page.locator('.Modal').locator(f'text={file_name}')
-                # 点击行的左侧（圆圈位置）
                 box = await file_row.bounding_box()
                 if box:
-                    # 点击行的左侧（假设圆圈在左边）
                     await self.page.mouse.click(box['x'] + 20, box['y'] + box['height']/2)
                     log("已点击文件左侧（圆圈位置）")
                 else:
-                    # 备用：直接点击文件名
                     await file_row.click()
                     log("已点击文件名")
             except Exception as e:
@@ -160,26 +156,38 @@ class ZhihuTool(PlatformTool):
             
             await asyncio.sleep(3)
             
-            # 第5步：打印弹窗内所有按钮，找到"请选择文件"
-            log("=== 查找弹窗内所有按钮 ===")
-            modal = await self.page.wait_for_selector('.Modal', timeout=10000)
-            all_buttons = await modal.query_selector_all('button')
-            log(f"弹窗内共有 {len(all_buttons)} 个button")
-            
+            # 第5步：等待并查找包含"选择"文字的按钮
+            log("等待'请选择文件'按钮加载...")
             target_btn = None
-            for i, btn in enumerate(all_buttons):
-                try:
-                    text = await btn.text_content()
-                    visible = await btn.is_visible()
-                    enabled = await btn.is_enabled()
-                    log(f"按钮 {i}: text='{text}', visible={visible}, enabled={enabled}")
+            
+            # 轮询等待按钮文字加载（最多30秒）
+            for attempt in range(30):
+                log(f"第{attempt+1}次尝试查找按钮...")
+                modal = await self.page.query_selector('.Modal')
+                if modal:
+                    all_buttons = await modal.query_selector_all('button')
+                    log(f"弹窗内有 {len(all_buttons)} 个button")
                     
-                    # 找到包含"选择"文字的按钮
-                    if text and ("请选择文件" in text or "选择文件" in text):
-                        target_btn = btn
-                        log(f"找到目标按钮: {text}")
-                except:
-                    pass
+                    for i, btn in enumerate(all_buttons):
+                        try:
+                            text = await btn.text_content()
+                            visible = await btn.is_visible()
+                            enabled = await btn.is_enabled()
+                            log(f"  按钮 {i}: text='{text}', visible={visible}, enabled={enabled}")
+                            
+                            if text and ("请选择文件" in text or "选择文件" in text):
+                                target_btn = btn
+                                log(f"找到目标按钮: {text}")
+                                break
+                        except:
+                            pass
+                    
+                    if target_btn:
+                        break
+                
+                if not target_btn:
+                    log("按钮文字还未加载，等待1秒...")
+                    await asyncio.sleep(1)
             
             # 第6步：点击目标按钮
             if target_btn:
@@ -187,8 +195,7 @@ class ZhihuTool(PlatformTool):
                     await target_btn.click()
                     log("已点击'请选择文件'按钮")
                 except Exception as e:
-                    log(f"点击按钮失败: {e}")
-                    # 尝试用JavaScript点击
+                    log(f"点击失败: {e}，尝试JavaScript点击...")
                     try:
                         await target_btn.evaluate('btn => btn.click()')
                         log("已用JavaScript点击按钮")
@@ -196,17 +203,21 @@ class ZhihuTool(PlatformTool):
                         log(f"JavaScript点击也失败: {e2}")
                         return ToolResult(success=False, error="无法点击确认按钮")
             else:
-                log("没找到'请选择文件'按钮，尝试点击最后一个可见按钮")
-                for btn in reversed(all_buttons):
-                    try:
+                log("30秒内没找到'请选择文件'按钮")
+                # 尝试点最后一个可见按钮作为备用
+                try:
+                    modal = await self.page.query_selector('.Modal')
+                    all_buttons = await modal.query_selector_all('button')
+                    for btn in reversed(all_buttons):
                         if await btn.is_visible():
                             await btn.click()
-                            log("已点击最后一个可见按钮")
+                            log("已点击最后一个可见按钮（备用）")
                             break
-                    except:
-                        continue
+                except Exception as e:
+                    log(f"备用点击也失败: {e}")
+                    return ToolResult(success=False, error="无法点击确认按钮")
             
-            # 第7步：等待导入完成（等待弹窗消失）
+            # 第7步：等待导入完成
             log("等待弹窗消失（导入完成）...")
             try:
                 await self.page.wait_for_selector('.Modal', state='hidden', timeout=60000)
@@ -253,7 +264,7 @@ class ZhihuTool(PlatformTool):
                 pass
             
             # 等待跳转
-            log("等待页面跳转到文章链接...")
+            log("等待页面跳转...")
             try:
                 await self.page.wait_for_url("**/p/**", timeout=60000)
                 log("页面已跳转")
@@ -269,7 +280,7 @@ class ZhihuTool(PlatformTool):
                 log(f"发布成功，文章ID: {post_id}")
                 return ToolResult(success=True, post_id=post_id, post_url=current_url)
             else:
-                log("URL不包含/p/，可能发布未成功")
+                log("发布未成功")
                 return ToolResult(success=False, error="发布未完成")
             
         except Exception as e:
