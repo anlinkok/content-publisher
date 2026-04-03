@@ -71,12 +71,13 @@ class BaijiahaoTool(PlatformTool):
             await self.page.keyboard.press('Delete')
             
             # 输入HTML内容
+            safe_html = article.html_content.replace('`', '`')
             await self.page.evaluate(f"""
                 const editor = document.querySelector('#ueditor_0') || 
                               document.querySelector('.editor-content') ||
                               document.querySelector('[contenteditable=\"true\"]');
                 if (editor) {{
-                    editor.innerHTML = `{article.html_content.replace('`', '\\`')}`;
+                    editor.innerHTML = `{safe_html}`;
                 }}
             """)
             

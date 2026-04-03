@@ -64,8 +64,9 @@ class ToutiaoTool(PlatformTool):
             await self.page.keyboard.press('Control+a')
             await self.page.keyboard.press('Delete')
             
+            safe_html = article.html_content.replace('`', '`')
             await self.page.evaluate(f"""
-                document.querySelector('.ProseMirror').innerHTML = `{article.html_content.replace('`', '\\`')}`;
+                document.querySelector('.ProseMirror').innerHTML = `{safe_html}`;
             """)
             
             await asyncio.sleep(2)

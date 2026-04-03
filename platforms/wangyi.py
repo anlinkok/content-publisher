@@ -68,15 +68,16 @@ class WangyiTool(PlatformTool):
             await self.page.keyboard.press('Delete')
             
             # 输入HTML内容
+            safe_html = article.html_content.replace('`', '`')
             await self.page.evaluate(f"""
                 const editor = document.querySelector('#ueditor_0') || 
                               document.querySelector('.edui-editor-iframeholder iframe') ||
                               document.querySelector('[contenteditable=\"true\"]');
                 if (editor) {{
                     if (editor.contentDocument) {{
-                        editor.contentDocument.body.innerHTML = `{article.html_content.replace('`', '\\`')}`;
+                        editor.contentDocument.body.innerHTML = `{safe_html}`;
                     }} else {{
-                        editor.innerHTML = `{article.html_content.replace('`', '\\`')}`;
+                        editor.innerHTML = `{safe_html}`;
                     }}
                 }}
             """)
