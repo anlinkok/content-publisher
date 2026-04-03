@@ -291,7 +291,8 @@ def cli():
 
 @cli.command()
 @click.argument('file_path')
-def publish(file_path: str):
+@click.option('--platform', '-p', help='指定平台 (如: zhihu, toutiao, xiaohongshu, baijiahao, wangyi, qiehao)')
+def publish(file_path: str, platform: str = None):
     """发布单篇文章（支持 Markdown 和 Word）"""
     if not os.path.exists(file_path):
         console.print(f"[red]文件不存在: {file_path}[/red]")
@@ -312,6 +313,11 @@ def publish(file_path: str):
     # 确保 source_file 存在（用于文档导入）
     if not getattr(article, 'source_file', None):
         article.source_file = file_path
+    
+    # 如果指定了平台，覆盖默认平台
+    if platform:
+        article.platforms = json.dumps([platform])
+        console.print(f"[yellow]指定发布平台: {platform}[/yellow]")
     
     console.print(Panel(f"[green]{article.title}[/green]", title="准备发布"))
     console.print(f"平台: {', '.join(json.loads(article.platforms))}")
