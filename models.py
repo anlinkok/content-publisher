@@ -42,6 +42,7 @@ class Article(SQLModel, table=True):
     status: str = Field(default=ArticleStatus.DRAFT)
     cover_image: Optional[str] = None
     tags: str = Field(default="[]")
+    source_file: Optional[str] = None  # 原始文件路径（用于文档导入）
     scheduled_at: Optional[datetime] = None
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)

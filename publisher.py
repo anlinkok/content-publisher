@@ -128,7 +128,8 @@ class ArticleManager:
                 platforms=json.dumps(platforms),
                 cover_image=cover_image,
                 tags=json.dumps(word_content.tags),
-                status=ArticleStatus.QUEUED
+                status=ArticleStatus.QUEUED,
+                source_file=file_path
             )
         except Exception as e:
             console.print(f"[red]解析Word文件失败: {e}[/red]")
