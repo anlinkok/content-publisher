@@ -97,21 +97,49 @@ class ZhihuTool(PlatformTool):
             await self.page.wait_for_load_state("networkidle")
             await asyncio.sleep(3)
             
-            # 查找并点击"导入文档"按钮
-            logger.info("点击导入文档按钮...")
+            # 查找并点击"导入"按钮
+            logger.info("点击导入按钮...")
             try:
+                # 尝试多种选择器找到"导入"按钮
                 import_btn = await self.page.wait_for_selector(
-                    'button:has-text("导入文档"), [data-tooltip="导入文档"], span:has-text("导入文档")',
+                    'button:has-text("导入"), [aria-label="导入"], .Toolbar-import, '
+                    '[class*="import"], span:has-text("导入")',
                     timeout=10000
                 )
                 await import_btn.click()
                 await asyncio.sleep(2)
+                
+                # 点击下拉菜单中的"文档导入"选项
+                try:
+                    doc_import = await self.page.wait_for_selector(
+                        'text=文档导入, [role="menuitem"]:has-text("文档"), li:has-text("文档")',
+                        timeout=5000
+                    )
+                    await doc_import.click()
+                    await asyncio.sleep(2)
+                except:
+                    logger.info("没有下拉菜单或已在导入界面")
             except Exception as e:
-                logger.warning(f"找不到导入文档按钮: {e}")
+                logger.warning(f"点击导入按钮失败: {e}")
             
-            # 查找文件上传输入框
+            # 查找文件上传输入框（接受docx的）
             logger.info(f"上传文件: {original_file}")
-            file_input = await self.page.wait_for_selector('input[type="file"]', timeout=10000)
+            # 等待文件输入框出现
+            await asyncio.sleep(2)
+            
+            # 找到接受 .docx 的文件输入框
+            file_inputs = await self.page.query_selector_all('input[type="file"]')
+            file_input = None
+            for inp in file_inputs:
+                accept = await inp.get_attribute('accept')
+                if accept and '.docx' in accept:
+                    file_input = inp
+                    break
+            
+            if not file_input:
+                # 如果没找到特定的，使用第一个
+                file_input = await self.page.wait_for_selector('input[type="file"]', timeout=10000)
+            
             await file_input.set_input_files(original_file)
             
             # 等待导入完成
