@@ -69,26 +69,96 @@ class ZhihuTool(PlatformTool):
             with open(self.cookie_file, 'w', encoding='utf-8') as f:
                 json.dump(storage, f, ensure_ascii=False, indent=2)
     
-    async def authenticate(self) -> bool:
-        if not self.page:
-            await self.init_browser(headless=False, load_cookie=True)
-            await self.page.goto("https://www.zhihu.com")
+    async def is_logged_in(self) -> bool:
+        """检查当前是否已登录"""
+        try:
+            await self.page.goto("https://www.zhihu.com", wait_until="domcontentloaded")
             await asyncio.sleep(2)
             
-            try:
-                await self.page.wait_for_selector('.AppHeader-profile img', timeout=5000)
+            # 检查头像元素（已登录用户有头像）
+            avatar_selectors = [
+                '.AppHeader-profile img',
+                '[data-za-detail-view-id="5162"] img',
+                '.Avatar img',
+                'img[alt*="头像"]',
+                '.UserAvatar img'
+            ]
+            
+            for selector in avatar_selectors:
+                try:
+                    element = await self.page.query_selector(selector)
+                    if element:
+                        # 检查是否可见
+                        is_visible = await element.is_visible()
+                        if is_visible:
+                            log(f"检测到登录状态，选择器: {selector}")
+                            return True
+                except:
+                    continue
+            
+            # 备选：检查 URL 是否被重定向到登录页
+            current_url = self.page.url
+            if "/signin" in current_url:
+                log("未登录，URL 包含 /signin")
+                return False
+            
+            # 备选：检查是否有"登录"按钮
+            login_btn = await self.page.query_selector('a[href="/signin"], button:has-text("登录")')
+            if login_btn:
+                is_visible = await login_btn.is_visible()
+                if is_visible:
+                    log("检测到登录按钮，未登录")
+                    return False
+            
+            log("登录状态不确定，假设已登录")
+            return True
+            
+        except Exception as e:
+            log(f"检查登录状态失败: {e}")
+            return False
+    
+    async def authenticate(self) -> bool:
+        """自动检测登录状态，需要时引导登录"""
+        from rich.console import Console
+        console = Console()
+        
+        # 初始化浏览器（加载已有 cookie）
+        if not self.page:
+            await self.init_browser(headless=False, load_cookie=True)
+        
+        # 检查是否已登录
+        console.print("[yellow]检查登录状态...[/yellow]")
+        if await self.is_logged_in():
+            console.print("[green]✓ 已是登录状态[/green]")
+            self._is_authenticated = True
+            return True
+        
+        # 需要登录，跳转到登录页
+        console.print("[yellow]未登录，请扫码或账号密码登录...[/yellow]")
+        await self.page.goto("https://www.zhihu.com/signin")
+        
+        # 自动检测登录成功（最多等60秒）
+        console.print("[cyan]等待登录完成（请在浏览器中操作）...[/cyan]")
+        start_time = asyncio.get_event_loop().time()
+        timeout = 60  # 最多等60秒
+        
+        while asyncio.get_event_loop().time() - start_time < timeout:
+            await asyncio.sleep(2)
+            
+            # 检查是否已登录
+            if await self.is_logged_in():
+                console.print("[green]✓ 登录成功！[/green]")
+                await self.save_cookie()
                 self._is_authenticated = True
                 return True
-            except:
-                pass
+            
+            # 显示进度
+            elapsed = int(asyncio.get_event_loop().time() - start_time)
+            console.print(f"[dim]等待中... {elapsed}s/{timeout}s[/dim]", end="\r")
         
-        from rich.console import Console
-        Console().print("[yellow]请在浏览器中完成知乎登录...[/yellow]")
-        await self.page.goto("https://www.zhihu.com/signin")
-        input("登录完成后请按回车键继续...")
-        await self.save_cookie()
-        self._is_authenticated = True
-        return True
+        # 超时
+        console.print("\n[red]登录超时，请重试[/red]")
+        return False
     
     async def publish(self, article, file_path: str = None) -> ToolResult:
         """使用文档导入功能发布"""
@@ -214,7 +284,6 @@ class ZhihuTool(PlatformTool):
             log("在发布弹窗中确认...")
             try:
                 # 找发布弹窗中的"发布"按钮
-                # 可能有多个"发布"按钮，找弹窗内的那个
                 confirm_btn = await self.page.wait_for_selector(
                     '.Modal button:has-text("发布"), [role="dialog"] button:has-text("发布")',
                     timeout=10000
