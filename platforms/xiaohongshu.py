@@ -215,20 +215,54 @@ class XiaohongshuTool(PlatformTool):
             except:
                 print("  - 一键排版按钮未找到或不需要")
             
-            # Step 8: 长文模式可能没有下一步，直接等待用户发布
-            print("\n========================================")
-            print("✓ 内容已填充完成")
-            print(f"  标题: {title}")
-            print("  请检查：")
-            print("    1. 文档是否已正确解析")
-            print("    2. 标题是否正确")
-            print("    3. 图片是否正常显示")
-            print("  然后点击【发布】或【保存草稿】")
-            print("========================================\n")
+            # Step 8: 点击下一步（如果有）
+            print("Step 8: 检查下一步...")
+            try:
+                next_btn = page.get_by_role("button", name="下一步")
+                if await next_btn.count() > 0:
+                    await next_btn.click()
+                    await asyncio.sleep(3)
+                    print("  ✓ 已点击下一步")
+            except:
+                print("  - 没有下一步按钮，继续")
             
-            # 保持浏览器打开，让用户手动操作
-            print("浏览器将保持打开5分钟...")
-            await asyncio.sleep(300)
+            # Step 9: 点击发布
+            print("Step 9: 点击发布...")
+            try:
+                publish_btn = page.get_by_role("button", name="发布")
+                if await publish_btn.count() > 0:
+                    await publish_btn.click()
+                    print("  ✓ 已点击发布")
+                    await asyncio.sleep(5)  # 等待发布完成
+                    
+                    # 尝试获取发布后的URL
+                    current_url = page.url
+                    print(f"  当前URL: {current_url}")
+                    
+                    print("\n========================================")
+                    print("✓ 发布完成！")
+                    print(f"  标题: {title}")
+                    if 'xiaohongshu.com' in current_url:
+                        print(f"  链接: {current_url}")
+                    print("========================================\n")
+                    
+                    await self.close()
+                    return ToolResult(
+                        success=True,
+                        data={'platform': 'xiaohongshu', 'title': title, 'url': current_url}
+                    )
+                else:
+                    print("  ! 未找到发布按钮，请手动点击")
+            except Exception as e:
+                print(f"  ! 点击发布失败: {e}")
+                print("  请手动点击发布按钮")
+            
+            # 如果自动发布失败，保持浏览器打开让用户手动操作
+            print("\n========================================")
+            print("请手动点击【发布】按钮")
+            print("浏览器将保持打开3分钟...")
+            print("========================================\n")
+            await asyncio.sleep(180)
             
             await self.close()
             return ToolResult(
