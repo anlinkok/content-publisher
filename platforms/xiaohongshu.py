@@ -228,45 +228,56 @@ class XiaohongshuTool(PlatformTool):
             # Step 4: 上传 Word 文件
             if file_path:
                 log(f"Step 4: 上传文件 {file_path}...")
-                upload_success = False
                 try:
-                    # 先点击导入按钮（isFromFileRed）
-                    log("点击导入按钮...")
-                    await self.page.locator(".isFromFileRed").click()
-                    log("✓ 已点击导入按钮")
+                    # 方法：直接用 JS 创建 input 并上传
+                    log("使用 JS 直接上传...")
+                    
+                    # 获取文件绝对路径
+                    abs_path = os.path.abspath(file_path)
+                    
+                    # 执行 JS 创建 input 并触发上传
+                    result = await self.page.evaluate("""async ({filePath}) => {
+                        // 创建隐藏 input
+                        const input = document.createElement('input');
+                        input.type = 'file';
+                        input.style.display = 'none';
+                        input.accept = '.docx,.doc,application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+                        document.body.appendChild(input);
+                        
+                        // 找到上传区域并模拟点击
+                        const uploadArea = document.querySelector('.isFromFileRed');
+                        if (uploadArea) {
+                            uploadArea.click();
+                            return {success: true, msg: '点击上传区域'};
+                        }
+                        return {success: false, msg: '未找到上传区域'};
+                    }""", {'filePath': abs_path})
+                    
+                    log(f"JS 执行结果: {result}")
                     await asyncio.sleep(3)
                     
-                    # 等待 file input 出现（点击后才出现）
-                    log("等待 file input 出现...")
-                    try:
-                        file_input = await self.page.wait_for_selector(
-                            'input[type="file"][accept*="wordprocessingml"]', 
-                            timeout=10000
-                        )
-                        await file_input.set_input_files(file_path)
-                        log("✓ 文件已上传到 Word input")
-                        upload_success = True
-                    except Exception as e1:
-                        log(f"特定 accept 失败: {e1}")
-                        # 备用：找任意 file input
-                        file_inputs = await self.page.locator('input[type="file"]').all()
-                        log(f"找到 {len(file_inputs)} 个 file input")
-                        
-                        for inp in file_inputs:
-                            try:
-                                accept = await inp.get_attribute('accept') or ''
-                                log(f"检查 input, accept={accept[:50]}...")
-                                if 'word' in accept.lower() or 'doc' in accept.lower():
-                                    await inp.set_input_files(file_path)
-                                    log("✓ 文件已上传（备用）")
-                                    upload_success = True
-                                    break
-                            except Exception as ie:
-                                log(f"单个input失败: {ie}")
-                                continue
+                    # 现在应该能看到 file input 了
+                    file_inputs = await self.page.locator('input[type="file"]').all()
+                    log(f"找到 {len(file_inputs)} 个 file input")
                     
-                    if not upload_success:
-                        raise Exception("没有找到合适的 file input")
+                    for i, inp in enumerate(file_inputs):
+                        try:
+                            is_visible = await inp.is_visible()
+                            accept = await inp.get_attribute('accept') or ''
+                            log(f"  [{i}] visible={is_visible}, accept={accept[:50]}...")
+                            
+                            if is_visible and ('word' in accept.lower() or 'doc' in accept.lower() or not accept):
+                                await inp.set_input_files(abs_path)
+                                log(f"✓ 文件已上传到 input[{i}]")
+                                break
+                        except Exception as ie:
+                            log(f"  [{i}] 失败: {ie}")
+                            continue
+                    else:
+                        # 都失败了就尝试最后一个
+                        if file_inputs:
+                            await file_inputs[-1].set_input_files(abs_path)
+                            log("✓ 文件已上传到最后一个 input")
                     
                     # 等待解析
                     log("等待文档解析（最多30秒）...")
