@@ -477,47 +477,54 @@ class WeiboTool(PlatformTool):
             draft_url = f"https://card.weibo.com/article/v5/editor#/draft/{post_id}"
             log(f"草稿保存成功: {draft_url}")
             
-            # 真正发布（默认尝试发布）
-            draft_only = getattr(article, 'draft_only', False)  # 默认直接发布
-            if not draft_only:
-                log("正在发布文章...")
-                publish_req_id = self.generate_req_id()
+            # 尝试通过浏览器点击发布按钮
+            try:
+                log("尝试点击发布按钮...")
+                await self.page.goto(f'https://card.weibo.com/article/v5/editor#/draft/{post_id}')
+                await asyncio.sleep(3)
                 
-                publish_result = await self.page.evaluate(f"""
-                    async () => {{
-                        const res = await fetch('https://card.weibo.com/article/v5/aj/editor/draft/publish?uid={config['uid']}&id={post_id}&_rid={publish_req_id}', {{
-                            method: 'POST',
-                            credentials: 'include',
-                            headers: {{
-                                'Content-Type': 'application/x-www-form-urlencoded',
-                                'accept': 'application/json, text/plain, */*',
-                                'SN-REQID': '{publish_req_id}',
-                            }},
-                            body: new URLSearchParams({{
-                                'id': '{post_id}',
-                                'from': 'draft'
-                            }}),
-                        }});
-                        return await res.json();
-                    }}
-                """)
+                # 查找发布按钮（可能有多种文本）
+                publish_selectors = [
+                    'button:has-text("发布")',
+                    'button:has-text("立即发布")',
+                    'button:has-text("确认发布")',
+                    '[data-testid="publish-btn"]',
+                    '.publish-btn',
+                    '.btn-publish',
+                ]
                 
-                log(f"发布响应: {publish_result}")
+                publish_btn = None
+                for selector in publish_selectors:
+                    try:
+                        publish_btn = await self.page.wait_for_selector(selector, timeout=3000)
+                        if publish_btn:
+                            log(f"找到发布按钮: {selector}")
+                            break
+                    except:
+                        continue
                 
-                pub_code = str(publish_result.get('code', ''))
-                if pub_code == '100000':
-                    log("发布成功！")
-                    published_url = f"https://card.weibo.com/article/m/show/id/{post_id}"
-                    await self.close()
-                    return ToolResult(
-                        success=True,
-                        post_id=post_id,
-                        post_url=published_url,
-                        data={'platform': 'weibo', 'published': True, 'url': published_url}
-                    )
+                if publish_btn:
+                    await publish_btn.click()
+                    log("已点击发布按钮，等待跳转...")
+                    await asyncio.sleep(5)
+                    
+                    current_url = self.page.url
+                    log(f"当前URL: {current_url}")
+                    
+                    if 'm/show' in current_url or 'article' in current_url:
+                        log("发布成功！")
+                        await self.close()
+                        return ToolResult(
+                            success=True,
+                            post_id=post_id,
+                            post_url=current_url,
+                            data={'platform': 'weibo', 'published': True, 'url': current_url}
+                        )
                 else:
-                    log(f"发布失败: {publish_result.get('msg', '未知错误')}")
-                    # 返回草稿链接，让用户手动发布
+                    log("未找到发布按钮，可能需要手动发布")
+                    
+            except Exception as e:
+                log(f"自动发布失败: {e}，请手动在草稿箱发布")
             
             await self.close()
             
