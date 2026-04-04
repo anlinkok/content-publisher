@@ -4,6 +4,7 @@
 """
 import asyncio
 import json
+import os
 import re
 from typing import Optional
 from playwright.async_api import Page
@@ -39,15 +40,25 @@ class XiaohongshuTool(PlatformTool):
             'user_agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         }
         
-        # 加载 Cookie
+        # 加载 Cookie（优先使用完整 state）
         if load_cookie:
+            # 尝试加载完整 storage state
+            state_file = f"data/cookies/{self.platform_id}_state.json"
             cookie_file = f"data/cookies/{self.platform_id}.json"
+            
             try:
-                with open(cookie_file, 'r', encoding='utf-8') as f:
-                    cookies = json.load(f)
-                    context_options['storage_state'] = {'cookies': cookies}
-            except FileNotFoundError:
-                pass
+                if os.path.exists(state_file):
+                    with open(state_file, 'r', encoding='utf-8') as f:
+                        storage = json.load(f)
+                        context_options['storage_state'] = storage
+                        print(f"已加载完整登录状态: {state_file}")
+                elif os.path.exists(cookie_file):
+                    with open(cookie_file, 'r', encoding='utf-8') as f:
+                        cookies = json.load(f)
+                        context_options['storage_state'] = {'cookies': cookies}
+                        print(f"已加载Cookie: {cookie_file}")
+            except Exception as e:
+                print(f"加载登录状态失败: {e}")
         
         self.browser = await self.playwright.chromium.launch(
             headless=headless,
@@ -171,11 +182,17 @@ class XiaohongshuTool(PlatformTool):
         return False
     
     async def save_cookies(self):
-        """保存 Cookie"""
-        import os
+        """保存登录状态（包括 cookies 和 localStorage）"""
         os.makedirs('data/cookies', exist_ok=True)
         
+        # 保存完整的 storage state（cookies + localStorage + sessionStorage）
         storage = await self.context.storage_state()
+        cookie_file = f'data/cookies/{self.platform_id}_state.json'
+        with open(cookie_file, 'w', encoding='utf-8') as f:
+            json.dump(storage, f, ensure_ascii=False, indent=2)
+        print(f"登录状态已保存到: {cookie_file}")
+        
+        # 同时保存旧格式的 cookies（兼容）
         with open(f'data/cookies/{self.platform_id}.json', 'w', encoding='utf-8') as f:
             json.dump(storage.get('cookies', []), f, ensure_ascii=False, indent=2)
     
