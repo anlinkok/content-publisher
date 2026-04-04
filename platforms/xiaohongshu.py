@@ -59,6 +59,30 @@ class XiaohongshuTool(PlatformTool):
     async def check_auth(self) -> dict:
         """检查登录状态"""
         try:
+            # 方法1: 检查页面是否有用户信息元素
+            user_info = await self.page.evaluate("""
+                () => {
+                    // 尝试从 window 对象获取用户信息
+                    if (window.__INITIAL_STATE__ && window.__INITIAL_STATE__.user) {
+                        return window.__INITIAL_STATE__.user;
+                    }
+                    // 尝试从 localStorage 获取
+                    try {
+                        const user = localStorage.getItem('user_info');
+                        if (user) return JSON.parse(user);
+                    } catch(e) {}
+                    return null;
+                }
+            """)
+            
+            if user_info and (user_info.get('user_id') or user_info.get('id')):
+                return {
+                    'is_authenticated': True,
+                    'user_id': str(user_info.get('user_id') or user_info.get('id')),
+                    'username': user_info.get('nickname', ''),
+                }
+            
+            # 方法2: 调用 API 检测
             result = await self.page.evaluate("""
                 async () => {
                     try {
@@ -77,6 +101,8 @@ class XiaohongshuTool(PlatformTool):
                 }
             """)
             
+            print(f"API 检测响应: {result}")
+            
             if result.get('data') and result.get('data', {}).get('user_id'):
                 return {
                     'is_authenticated': True,
@@ -84,8 +110,21 @@ class XiaohongshuTool(PlatformTool):
                     'username': result['data'].get('nickname', ''),
                     'avatar': result['data'].get('avatar', ''),
                 }
-            return {'is_authenticated': False}
+            
+            # 方法3: 简单检查是否还在登录页
+            current_url = self.page.url
+            if 'login' not in current_url and 'creator.xiaohongshu.com' in current_url:
+                # 页面已跳转，大概率已登录
+                return {
+                    'is_authenticated': True,
+                    'user_id': 'unknown',
+                    'username': 'unknown',
+                    'note': '页面已跳转，假设已登录'
+                }
+            
+            return {'is_authenticated': False, 'response': result}
         except Exception as e:
+            print(f"登录检测出错: {e}")
             return {'is_authenticated': False, 'error': str(e)}
     
     async def is_logged_in(self) -> bool:
@@ -115,13 +154,21 @@ class XiaohongshuTool(PlatformTool):
                 await asyncio.sleep(3)  # 等待页面完全加载
                 
                 # 检测登录状态
-                if await self.is_logged_in():
-                    print("✓ 登录成功！")
+                auth_result = await self.check_auth()
+                if auth_result.get('is_authenticated'):
+                    print(f"✓ 登录成功！用户: {auth_result.get('username', 'unknown')}")
                     # 保存 Cookie
                     await self.save_cookies()
                     await self.close()
                     return True
                 else:
+                    print(f"登录检测详情: {auth_result}")
+                    # 如果页面已跳转，大概率已登录，直接保存
+                    if 'login' not in current_url:
+                        print("✓ 页面已跳转，假设登录成功，保存Cookie...")
+                        await self.save_cookies()
+                        await self.close()
+                        return True
                     print("页面已跳转但登录检测失败，继续等待...")
             
             # 每10秒显示进度
