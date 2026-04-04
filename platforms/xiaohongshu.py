@@ -237,41 +237,53 @@ class XiaohongshuTool(PlatformTool):
             if file_path:
                 log(f"Step 4: 上传文件 {file_path}...")
                 try:
-                    # 先点击上传按钮打开文件选择对话框
+                    # 先点击上传按钮
                     await self.page.locator(".isFromFileRed").click()
                     log("✓ 已点击上传按钮")
                     await asyncio.sleep(2)
                     
-                    # 现在查找文件输入框
+                    # 查找文件输入框并上传
                     file_input = await self.page.wait_for_selector('input[type="file"]', timeout=10000)
                     await file_input.set_input_files(file_path)
-                    log(f"✓ 已选择文件，等待解析...")
-                    await asyncio.sleep(10)  # 等待上传和解析完成
+                    log(f"✓ 文件已选择")
                     
-                    # 关闭可能弹出的上传成功提示/对话框
-                    try:
-                        await self.page.keyboard.press("Escape")
+                    # 关键：等待解析完成（看标题是否自动填入）
+                    log("等待文档解析（最多30秒）...")
+                    for i in range(30):
                         await asyncio.sleep(1)
-                    except:
-                        pass
+                        # 检查标题是否已自动填入
+                        try:
+                            title_val = await self.page.locator('[placeholder*="标题"]').first.input_value()
+                            if title_val and len(title_val) > 0:
+                                log(f"✓ 文档解析完成，自动标题: {title_val}")
+                                break
+                        except:
+                            pass
+                        if i % 5 == 0:
+                            log(f"  解析中... {i}s")
                     
-                    log("✓ 文件上传并解析完成")
                 except Exception as e:
                     log(f"文件上传失败: {e}")
+                    # 截图看问题
+                    ss = f'data/xiaohongshu_upload_error_{int(asyncio.get_event_loop().time())}.png'
+                    await self.page.screenshot(path=ss, full_page=True)
+                    log(f"错误截图: {ss}")
             
-            # Step 5: 填写标题（覆盖自动解析的标题）
+            # 截图看当前状态
+            ss = f'data/xiaohongshu_step4_{int(asyncio.get_event_loop().time())}.png'
+            await self.page.screenshot(path=ss, full_page=True)
+            log(f"Step 4 完成截图: {ss}")
+            
+            # Step 5: 修改标题（如果需要）
             title = getattr(article, 'title', '')[:20]
             if title:
-                log(f"Step 5: 填写标题: {title}")
+                log(f"Step 5: 修改标题为: {title}")
                 try:
-                    # 先清空自动解析的标题，再填入新标题
                     title_input = self.page.locator('[placeholder*="标题"]').first
-                    await title_input.click()
-                    await title_input.fill("")  # 清空
-                    await title_input.fill(title)  # 填入新标题
-                    log("✓ 标题填写完成")
+                    await title_input.fill(title)
+                    log("✓ 标题修改完成")
                 except Exception as e:
-                    log(f"标题填写失败: {e}")
+                    log(f"标题修改失败（可能已自动填入）: {e}")
             
             # Step 6: 一键排版
             log("Step 6: 一键排版...")
