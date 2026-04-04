@@ -1,0 +1,105 @@
+{
+  "name": "电商铺货-简化版",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 6
+            }
+          ]
+        }
+      },
+      "name": "定时触发",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.sourceUrl }}",
+        "responseFormat": "string"
+      },
+      "name": "采集商品页面",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "extractionValues": {
+          "values": [
+            {
+              "key": "title",
+              "cssSelector": "h1",
+              "returnValue": "text"
+            },
+            {
+              "key": "price",
+              "cssSelector": ".price, [class*=\"price\"]",
+              "returnValue": "text"
+            },
+            {
+              "key": "image",
+              "cssSelector": "img",
+              "returnAttribute": "src",
+              "returnValue": "attribute"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "HTML提取数据",
+      "type": "n8n-nodes-base.htmlExtract",
+      "typeVersion": 1.2,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "webhookUri": "={{ $env.DISCORD_WEBHOOK }}",
+        "text": "={{ \"铺货完成！\\n商品：\" + $json.title + \"\\n价格：\" + $json.price }}"
+      },
+      "name": "Discord通知",
+      "type": "n8n-nodes-base.discord",
+      "typeVersion": 1,
+      "position": [850, 300]
+    }
+  ],
+  "connections": {
+    "定时触发": {
+      "main": [
+        [
+          {
+            "node": "采集商品页面",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "采集商品页面": {
+      "main": [
+        [
+          {
+            "node": "HTML提取数据",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTML提取数据": {
+      "main": [
+        [
+          {
+            "node": "Discord通知",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

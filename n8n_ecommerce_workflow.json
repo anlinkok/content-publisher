@@ -1,0 +1,393 @@
+{
+  "name": "电商多平台铺货自动化",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "trigger-node",
+      "name": "When clicking 'Execute Workflow'",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 配置源商品链接和目标平台\nconst sourceUrl = $input.first().json.sourceUrl || 'https://item.taobao.com/item.htm?id=xxxx';\nconst sourcePlatform = $input.first().json.sourcePlatform || 'taobao';\nconst targetPlatforms = $input.first().json.targetPlatforms || ['pdd', 'douyin'];\n\nreturn [{\n  json: {\n    sourceUrl,\n    sourcePlatform,\n    targetPlatforms,\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "config-node",
+      "name": "设置参数",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.sourceUrl }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "http-node",
+      "name": "HTTP Request采集",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 解析HTML提取商品信息\nconst cheerio = require('cheerio');\nconst $ = cheerio.load($input.first().json.data);\n\n// 提取标题\nlet title = $('h1[data-spm=\"title\"]').text() || \n            $('.tb-detail-hd h1').text() || \n            '[data-testid=\"pdp-title\"]').text() ||\n            '未获取到标题';\n\n// 提取价格\nlet priceText = $('.tb-rmb-num').first().text() || \n                $('.notranslate').first().text() ||\n                '[class*=\"price\"]').first().text() ||\n                '0';\nlet price = parseFloat(priceText.replace(/[¥,]/g, '')) || 0;\n\n// 提取主图\nlet images = [];\n$('#J_UlThumb img').each((i, el) => {\n  let src = $(el).attr('src');\n  if (src) images.push(src.replace(/_\d+x\d+.*\./, '.'));\n});\n\n// 提取详情图\nlet detailImages = [];\n$('.J_DetailContent img').each((i, el) => {\n  let src = $(el).attr('src');\n  if (src) detailImages.push(src);\n});\n\nreturn [{\n  json: {\n    title: title.trim().substring(0, 60),\n    price: price,\n    originalPrice: Math.round(price * 1.2 * 100) / 100,\n    stock: 999,\n    images: images.slice(0, 5),\n    detailImages: detailImages.slice(0, 10),\n    description: title.trim(),\n    sourceUrl: $input.first().json.sourceUrl,\n    sourcePlatform: $input.first().json.sourcePlatform\n  }\n}];"
+      },
+      "id": "parse-node",
+      "name": "解析商品数据",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [850, 300]
+    },
+    {
+      "parameters": {
+        "operation": "writeBinaryFile",
+        "fileName": "={{ 'product_' + Date.now() + '.json' }}",
+        "data": "={{ JSON.stringify($json, null, 2) }}",
+        "options": {
+          "filePath": "/data/products"
+        }
+      },
+      "id": "save-node",
+      "name": "保存商品数据",
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [1050, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 处理图片：下载、加水印、压缩\nconst product = $input.first().json;\nconst processedImages = [];\n\nfor (let imgUrl of product.images) {\n  // 构建图片处理任务\n  processedImages.push({\n    url: imgUrl,\n    filename: 'img_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9) + '.jpg',\n    watermark: '你的店铺名'\n  });\n}\n\nreturn processedImages.map((img, i) => ({\n  json: {\n    ...img,\n    index: i,\n    productTitle: product.title\n  }\n}));"
+      },
+      "id": "split-images-node",
+      "name": "拆分为图片任务",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [850, 500]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.url }}",
+        "options": {
+          "responseFormat": "file",
+          "timeout": 30000
+        }
+      },
+      "id": "download-image-node",
+      "name": "下载图片",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1050, 500]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 这里可以调用图片处理API\n// 例如：remove.bg去背景、加水印、压缩等\n\nconst imageData = $input.first().json.data;\nconst watermark = $input.first().json.watermark;\n\n// 构建处理后的图片信息\nreturn [{\n  json: {\n    originalUrl: $input.first().json.url,\n    filename: $input.first().json.filename,\n    processed: true,\n    watermark: watermark,\n    size: imageData ? imageData.length : 0\n  }\n}];"
+      },
+      "id": "process-image-node",
+      "name": "处理图片",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1250, 500]
+    },
+    {
+      "parameters": {
+        "operation": "aggregate",
+        "fieldsToAggregate": {
+          "fields": [
+            {
+              "field": "filename",
+              "rename": "processedImages",
+              "aggregate": "concatenate"
+            }
+          ]
+        }
+      },
+      "id": "aggregate-node",
+      "name": "聚合图片结果",
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [1450, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 构建各平台发布数据\nconst product = $input.first().json;\nconst platforms = ['pdd', 'douyin', 'taobao'];\n\nreturn platforms.map(platform => ({\n  json: {\n    platform: platform,\n    title: platform === 'pdd' ? product.title.substring(0, 30) : product.title.substring(0, 60),\n    price: product.price,\n    stock: product.stock,\n    images: product.images,\n    description: product.description,\n    ready: true\n  }\n}));"
+      },
+      "id": "prepare-publish-node",
+      "name": "准备发布数据",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1650, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "condition-1",
+              "leftValue": "={{ $json.platform }}",
+              "rightValue": "pdd",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ]
+        }
+      },
+      "id": "switch-platform-node",
+      "name": "按平台分发",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 2,
+      "position": [1850, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 拼多多发布逻辑\n// 调用拼多多开放平台API或模拟浏览器操作\n\nconst product = $input.first().json;\nconsole.log('发布到拼多多:', product.title);\n\n// 实际实现需要：\n// 1. 调用 pdd.goods.add API\n// 2. 或使用puppeteer/playwright模拟发布\n\nreturn [{\n  json: {\n    platform: 'pdd',\n    status: 'published',\n    productId: 'PDD_' + Date.now(),\n    title: product.title,\n    price: product.price\n  }\n}];"
+      },
+      "id": "publish-pdd-node",
+      "name": "发布到拼多多",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2050, 100]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 抖音发布逻辑\n\nconst product = $input.first().json;\nconsole.log('发布到抖音:', product.title);\n\nreturn [{\n  json: {\n    platform: 'douyin',\n    status: 'published',\n    productId: 'DY_' + Date.now(),\n    title: product.title,\n    price: product.price\n  }\n}];"
+      },
+      "id": "publish-douyin-node",
+      "name": "发布到抖音",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2050, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 淘宝发布逻辑\n\nconst product = $input.first().json;\nconsole.log('发布到淘宝:', product.title);\n\nreturn [{\n  json: {\n    platform: 'taobao',\n    status: 'published',\n    productId: 'TB_' + Date.now(),\n    title: product.title,\n    price: product.price\n  }\n}];"
+      },
+      "id": "publish-taobao-node",
+      "name": "发布到淘宝",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2050, 500]
+    },
+    {
+      "parameters": {
+        "operation": "aggregate"
+      },
+      "id": "aggregate-results-node",
+      "name": "聚合发布结果",
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [2250, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 发送通知\nconst results = $input.all();\nconst summary = results.map(r => \n  `${r.json.platform}: ${r.json.status} (ID: ${r.json.productId})`\n).join('\\n');\n\nreturn [{\n  json: {\n    message: '铺货完成！\\n' + summary,\n    timestamp: new Date().toISOString(),\n    totalPlatforms: results.length\n  }\n}];"
+      },
+      "id": "notify-node",
+      "name": "发送通知",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2450, 300]
+    }
+  ],
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "connections": {
+    "When clicking 'Execute Workflow'": {
+      "main": [
+        [
+          {
+            "node": "设置参数",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "设置参数": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request采集",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request采集": {
+      "main": [
+        [
+          {
+            "node": "解析商品数据",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "解析商品数据": {
+      "main": [
+        [
+          {
+            "node": "保存商品数据",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "拆分为图片任务",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "拆分为图片任务": {
+      "main": [
+        [
+          {
+            "node": "下载图片",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "下载图片": {
+      "main": [
+        [
+          {
+            "node": "处理图片",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "处理图片": {
+      "main": [
+        [
+          {
+            "node": "聚合图片结果",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "保存商品数据": {
+      "main": [
+        [
+          {
+            "node": "准备发布数据",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "聚合图片结果": {
+      "main": [
+        [
+          {
+            "node": "准备发布数据",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "准备发布数据": {
+      "main": [
+        [
+          {
+            "node": "按平台分发",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "按平台分发": {
+      "main": [
+        [
+          {
+            "node": "发布到拼多多",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "发布到抖音",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "发布到淘宝",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "发布到拼多多": {
+      "main": [
+        [
+          {
+            "node": "聚合发布结果",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "发布到抖音": {
+      "main": [
+        [
+          {
+            "node": "聚合发布结果",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "发布到淘宝": {
+      "main": [
+        [
+          {
+            "node": "聚合发布结果",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "聚合发布结果": {
+      "main": [
+        [
+          {
+            "node": "发送通知",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
