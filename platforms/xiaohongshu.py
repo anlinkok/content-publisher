@@ -212,7 +212,8 @@ class XiaohongshuTool(PlatformTool):
             # Step 2: 选择"写长文"
             log("Step 2: 选择写长文...")
             try:
-                await self.page.get_by_text("写长文").click()
+                # 使用 first 避免严格模式冲突
+                await self.page.get_by_text("写长文").first.click()
                 log("✓ 已选择写长文")
                 await asyncio.sleep(3)
             except Exception as e:
@@ -221,11 +222,16 @@ class XiaohongshuTool(PlatformTool):
             # Step 3: 点击"新的创作"
             log("Step 3: 点击新的创作...")
             try:
-                await self.page.get_by_role("button", name="新的创作").click()
+                # 使用 first 并增加超时
+                await self.page.get_by_role("button", name="新的创作").first.click()
                 log("✓ 已点击新的创作")
                 await asyncio.sleep(3)
             except Exception as e:
                 log(f"点击新的创作失败: {e}")
+                # 如果失败，可能是页面没跳转，直接访问创建页
+                log("尝试直接访问创建页面...")
+                await self.page.goto('https://creator.xiaohongshu.com/creator/note/create?from=publish')
+                await asyncio.sleep(5)
             
             # Step 4: 上传 Word 文件
             if file_path:
