@@ -28,6 +28,7 @@ from platforms import (
     BaijiahaoTool, WangyiTool, QiehaoTool,
     JuejinTool, CSDNTool, CnblogsTool, 
     OschinaTool, SegmentfaultTool, SohuTool,
+    WeiboTool,
     ToolResult
 )
 
@@ -47,6 +48,7 @@ PLATFORM_TOOLS = {
     'oschina': OschinaTool,
     'segmentfault': SegmentfaultTool,
     'sohu': SohuTool,
+    'weibo': WeiboTool,
 }
 
 
@@ -299,7 +301,7 @@ def cli():
 
 @cli.command()
 @click.argument('file_path')
-@click.option('--platform', '-p', help='指定平台 (如: zhihu, toutiao, baijiahao, juejin, csdn, cnblogs, oschina, segmentfault, xiaohongshu, wangyi, qiehao, sohu)')
+@click.option('--platform', '-p', help='指定平台 (如: zhihu, toutiao, baijiahao, juejin, csdn, cnblogs, oschina, segmentfault, xiaohongshu, wangyi, qiehao, sohu, weibo)')
 def publish(file_path: str, platform: str = None):
     """发布单篇文章（支持 Markdown 和 Word）"""
     if not os.path.exists(file_path):

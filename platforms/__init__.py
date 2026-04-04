@@ -12,6 +12,7 @@ from .cnblogs import CnblogsTool
 from .oschina import OschinaTool
 from .segmentfault import SegmentfaultTool
 from .sohu import SohuTool
+from .weibo import WeiboTool
 
 __all__ = [
     'PlatformTool',
@@ -28,4 +29,5 @@ __all__ = [
     'OschinaTool',
     'SegmentfaultTool',
     'SohuTool',
+    'WeiboTool',
 ]
