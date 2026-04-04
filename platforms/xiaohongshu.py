@@ -230,38 +230,43 @@ class XiaohongshuTool(PlatformTool):
                 log(f"Step 4: 上传文件 {file_path}...")
                 upload_success = False
                 try:
-                    # 点击包含导入SVG的按钮（根据你提供的path）
+                    # 先点击导入按钮（isFromFileRed）
                     log("点击导入按钮...")
+                    await self.page.locator(".isFromFileRed").click()
+                    log("✓ 已点击导入按钮")
+                    await asyncio.sleep(3)
+                    
+                    # 等待 file input 出现（点击后才出现）
+                    log("等待 file input 出现...")
                     try:
-                        # 通过SVG path定位
-                        await self.page.locator('svg path[d*="M13.4287 1.72845"]').click()
-                        log("✓ 已点击导入按钮（通过SVG）")
-                    except:
-                        # 备用：点击文字
-                        await self.page.locator(".isFromFileRed").click()
-                        log("✓ 已点击导入按钮（备用）")
-                    
-                    await asyncio.sleep(2)
-                    
-                    # 找 file input
-                    file_inputs = await self.page.locator('input[type="file"]').all()
-                    log(f"找到 {len(file_inputs)} 个 file input")
-                    
-                    for inp in file_inputs:
-                        try:
-                            accept = await inp.get_attribute('accept') or ''
-                            log(f"检查 input, accept={accept}")
-                            if 'video' not in accept.lower():
-                                await inp.set_input_files(file_path)
-                                log("✓ 文件已上传")
-                                upload_success = True
-                                break
-                        except Exception as ie:
-                            log(f"单个input上传失败: {ie}")
-                            continue
+                        file_input = await self.page.wait_for_selector(
+                            'input[type="file"][accept*="wordprocessingml"]', 
+                            timeout=10000
+                        )
+                        await file_input.set_input_files(file_path)
+                        log("✓ 文件已上传到 Word input")
+                        upload_success = True
+                    except Exception as e1:
+                        log(f"特定 accept 失败: {e1}")
+                        # 备用：找任意 file input
+                        file_inputs = await self.page.locator('input[type="file"]').all()
+                        log(f"找到 {len(file_inputs)} 个 file input")
+                        
+                        for inp in file_inputs:
+                            try:
+                                accept = await inp.get_attribute('accept') or ''
+                                log(f"检查 input, accept={accept[:50]}...")
+                                if 'word' in accept.lower() or 'doc' in accept.lower():
+                                    await inp.set_input_files(file_path)
+                                    log("✓ 文件已上传（备用）")
+                                    upload_success = True
+                                    break
+                            except Exception as ie:
+                                log(f"单个input失败: {ie}")
+                                continue
                     
                     if not upload_success:
-                        raise Exception("没有找到合适的file input")
+                        raise Exception("没有找到合适的 file input")
                     
                     # 等待解析
                     log("等待文档解析（最多30秒）...")
