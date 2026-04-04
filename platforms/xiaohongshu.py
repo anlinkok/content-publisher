@@ -262,14 +262,10 @@ class XiaohongshuTool(PlatformTool):
                 return ToolResult(success=False, error="未登录")
             
             log("已登录，进入发布页面...")
-            await self.page.goto('https://creator.xiaohongshu.com/publish/publish')
+            # 小红书发布页面
+            await self.page.goto('https://creator.xiaohongshu.com/creator/note/create', wait_until='domcontentloaded')
             log("等待页面加载...")
             await asyncio.sleep(5)
-            
-            # 截图查看页面状态
-            screenshot_path = f'data/xiaohongshu_publish_{int(asyncio.get_event_loop().time())}.png'
-            await self.page.screenshot(path=screenshot_path, full_page=True)
-            log(f"页面截图已保存: {screenshot_path}")
             
             # 输出当前页面信息
             current_url = self.page.url
@@ -281,26 +277,65 @@ class XiaohongshuTool(PlatformTool):
                 await self.close()
                 return ToolResult(success=False, error="未登录")
             
-            # 处理封面图片上传
+            # 等待编辑器加载
+            try:
+                await self.page.wait_for_selector('div[contenteditable="true"]', timeout=10000)
+                log("编辑器加载完成")
+            except Exception as e:
+                log(f"编辑器加载超时: {e}")
+                # 截图查看页面状态
+                screenshot_path = f'data/xiaohongshu_publish_{int(asyncio.get_event_loop().time())}.png'
+                await self.page.screenshot(path=screenshot_path, full_page=True)
+                log(f"页面截图已保存: {screenshot_path}")
+            
+            # 小红书发布流程：先上传图片，再填写文字
+            # 处理图片上传（小红书必须先有图片）
             cover_image = getattr(article, 'cover_image', None)
-            if cover_image and file_path:
-                log(f"上传封面图片: {cover_image}")
+            if cover_image:
+                log(f"上传图片: {cover_image}")
                 try:
-                    # 查找文件输入框
-                    file_input = await self.page.wait_for_selector('input[type="file"]', timeout=5000)
-                    await file_input.set_input_files(cover_image)
-                    await asyncio.sleep(3)
-                    log("封面上传完成")
+                    # 等待文件输入框出现
+                    await self.page.wait_for_selector('input[type="file"]', timeout=10000)
+                    file_inputs = await self.page.query_selector_all('input[type="file"]')
+                    if file_inputs:
+                        await file_inputs[0].set_input_files(cover_image)
+                        log("图片已选择，等待上传...")
+                        await asyncio.sleep(5)  # 等待上传完成
+                        log("图片上传完成")
+                    else:
+                        log("未找到文件输入框")
                 except Exception as e:
-                    log(f"封面上传失败: {e}")
+                    log(f"图片上传失败: {e}")
+            else:
+                log("警告: 没有封面图片，小红书需要至少一张图片")
             
             # 填写标题（限制20字）
             title = getattr(article, 'title', '无标题')[:20]
             log(f"填写标题: {title}")
             
             try:
-                title_input = await self.page.wait_for_selector('textarea[placeholder*="标题"], input[placeholder*="标题"]', timeout=5000)
-                await title_input.fill(title)
+                # 小红书标题选择器 - 使用多种方式
+                title_selectors = [
+                    'input[placeholder*="标题"]',
+                    'textarea[placeholder*="标题"]',
+                    'div[contenteditable="true"]',
+                    '[class*="title"]',
+                ]
+                title_input = None
+                for selector in title_selectors:
+                    try:
+                        title_input = await self.page.wait_for_selector(selector, timeout=3000)
+                        if title_input:
+                            log(f"找到标题输入框: {selector}")
+                            break
+                    except:
+                        continue
+                
+                if title_input:
+                    await title_input.fill(title)
+                    log("标题填写完成")
+                else:
+                    log("未找到标题输入框")
             except Exception as e:
                 log(f"标题输入失败: {e}")
             
@@ -309,38 +344,77 @@ class XiaohongshuTool(PlatformTool):
             log(f"填写正文: {len(content)} 字")
             
             try:
-                content_input = await self.page.wait_for_selector('textarea[placeholder*="正文"], [contenteditable="true"]', timeout=5000)
-                await content_input.fill(content)
+                # 查找内容编辑器
+                content_editors = await self.page.query_selector_all('div[contenteditable="true"]')
+                if len(content_editors) >= 2:
+                    # 通常第一个是标题，第二个是正文
+                    await content_editors[1].fill(content)
+                    log("正文填写完成")
+                elif len(content_editors) == 1:
+                    await content_editors[0].fill(content)
+                    log("内容填写完成")
+                else:
+                    log("未找到内容编辑器")
             except Exception as e:
                 log(f"正文输入失败: {e}")
             
-            await asyncio.sleep(1)
+            await asyncio.sleep(2)
             
             # 点击发布按钮
             log("点击发布...")
             try:
-                publish_btn = await self.page.wait_for_selector('button:has-text("发布"), button:has-text("立即发布")', timeout=5000)
-                await publish_btn.click()
-                await asyncio.sleep(5)
+                # 多种发布按钮选择器
+                publish_selectors = [
+                    'button:has-text("发布")',
+                    'button:has-text("立即发布")',
+                    'button.publish-btn',
+                    '[class*="publish"] button',
+                    'button[type="submit"]',
+                ]
                 
-                # 检查发布结果
-                current_url = self.page.url
-                if 'success' in current_url or 'published' in current_url:
-                    log("发布成功")
-                    await self.close()
-                    return ToolResult(
-                        success=True,
-                        post_url=current_url,
-                        data={'platform': 'xiaohongshu', 'url': current_url}
-                    )
+                publish_btn = None
+                for selector in publish_selectors:
+                    try:
+                        publish_btn = await self.page.wait_for_selector(selector, timeout=3000)
+                        if publish_btn:
+                            log(f"找到发布按钮: {selector}")
+                            break
+                    except:
+                        continue
+                
+                if publish_btn:
+                    await publish_btn.click()
+                    log("已点击发布，等待结果...")
+                    await asyncio.sleep(8)
+                    
+                    # 检查发布结果
+                    current_url = self.page.url
+                    log(f"发布后URL: {current_url}")
+                    
+                    if 'success' in current_url or 'published' in current_url or 'note' in current_url:
+                        log("✓ 发布成功！")
+                        await self.close()
+                        return ToolResult(
+                            success=True,
+                            post_url=current_url,
+                            data={'platform': 'xiaohongshu', 'url': current_url}
+                        )
+                    else:
+                        # 截图查看结果
+                        result_screenshot = f'data/xiaohongshu_result_{int(asyncio.get_event_loop().time())}.png'
+                        await self.page.screenshot(path=result_screenshot, full_page=True)
+                        log(f"结果截图: {result_screenshot}")
+                        
+                        await self.close()
+                        return ToolResult(
+                            success=True,
+                            post_url=current_url,
+                            data={'platform': 'xiaohongshu', 'url': current_url, 'note': '请检查截图确认发布状态'}
+                        )
                 else:
-                    log(f"发布完成，当前URL: {current_url}")
+                    log("未找到发布按钮")
                     await self.close()
-                    return ToolResult(
-                        success=True,
-                        post_url=current_url,
-                        data={'platform': 'xiaohongshu', 'url': current_url}
-                    )
+                    return ToolResult(success=False, error="未找到发布按钮")
                     
             except Exception as e:
                 log(f"发布按钮点击失败: {e}")
