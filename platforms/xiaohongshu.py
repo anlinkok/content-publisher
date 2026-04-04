@@ -314,21 +314,21 @@ class XiaohongshuTool(PlatformTool):
             await self.close()
             return ToolResult(success=False, error=str(e))
     
-    async def check_status(self, post_id: str) -> dict:
+    async def check_status(self, post_id: str) -> ToolResult:
         """检查笔记发布状态"""
         try:
             await self.init_browser()
             
             if not await self.is_logged_in():
-                return {'success': False, 'error': '未登录'}
+                return ToolResult(success=False, error='未登录')
             
             # 访问创作者中心查看笔记状态
             await self.page.goto('https://creator.xiaohongshu.com/new/note-manager')
             await asyncio.sleep(3)
             
             await self.close()
-            return {'success': True, 'status': 'unknown', 'note': '请访问创作者中心查看笔记状态'}
+            return ToolResult(success=True, data={'status': 'unknown', 'note': '请访问创作者中心查看笔记状态'})
             
         except Exception as e:
             await self.close()
-            return {'success': False, 'error': str(e)}
+            return ToolResult(success=False, error=str(e))
