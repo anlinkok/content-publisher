@@ -154,34 +154,47 @@ class XiaohongshuTool(PlatformTool):
             await page.get_by_role("button", name="新的创作").click()
             await asyncio.sleep(2)
             
-            # Step 5: 上传 Word 文件（关键：Codegen 发现直接在 body 上 set_input_files）
+            # Step 5: 上传 Word 文件（使用 filechooser 事件）
             if file_path and os.path.exists(file_path):
                 print(f"Step 5: 上传文件 {os.path.basename(file_path)}...")
                 
-                # 先点击导入按钮
-                print("  - 点击导入按钮...")
-                await page.locator(".isFromFileRed").click()
-                await asyncio.sleep(1)
-                
-                # 点击上传区域
-                print("  - 点击上传区域...")
-                # 使用 nth(3) 因为页面上可能有多个匹配的元素
-                upload_divs = await page.locator("div").filter(has_text="点击或拖拽上传").all()
-                if len(upload_divs) > 3:
-                    await upload_divs[3].click()
-                else:
-                    # 尝试点击第一个
-                    try:
-                        await page.locator("div").filter(has_text="点击或拖拽上传").first.click()
-                    except:
-                        pass
-                await asyncio.sleep(1)
-                
-                # 关键：在 body 上设置文件
-                print("  - 设置文件...")
-                await page.locator("body").set_input_files(file_path)
-                print("  ✓ 文件已上传，等待解析...")
-                await asyncio.sleep(10)  # 等待解析
+                # 点击导入按钮并处理文件选择
+                print("  - 点击导入按钮并等待文件选择框...")
+                try:
+                    # 监听 filechooser 事件
+                    async with page.expect_filechooser() as fc_info:
+                        await page.locator(".isFromFileRed").click()
+                    filechooser = await fc_info.value
+                    
+                    # 设置文件路径
+                    await filechooser.set_files(file_path)
+                    print("  ✓ 文件已选择，等待解析...")
+                    await asyncio.sleep(10)  # 等待解析
+                    
+                except Exception as e:
+                    print(f"  ! filechooser 失败: {e}")
+                    print("  - 尝试备用方法：查找 file input...")
+                    
+                    # 备用：点击后查找 file input
+                    await page.locator(".isFromFileRed").click()
+                    await asyncio.sleep(2)
+                    
+                    # 找所有 file input
+                    file_inputs = await page.locator('input[type="file"]').all()
+                    print(f"    找到 {len(file_inputs)} 个 file input")
+                    
+                    if file_inputs:
+                        for i, inp in enumerate(file_inputs):
+                            try:
+                                await inp.set_input_files(file_path)
+                                print(f"    ✓ 使用 input[{i}] 上传成功")
+                                await asyncio.sleep(10)
+                                break
+                            except Exception as e2:
+                                print(f"    input[{i}] 失败: {e2}")
+                    else:
+                        print("  ! 未找到 file input，请手动上传")
+                        await asyncio.sleep(30)
             
             # Step 6: 填写标题
             print("Step 6: 填写标题...")
