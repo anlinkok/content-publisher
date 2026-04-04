@@ -199,21 +199,14 @@ class XiaohongshuTool(PlatformTool):
             # 7. 填充正文（使用 evaluate 注入）
             print("[7/10] 填写正文...")
             try:
-                # 预处理内容
-                safe_content = formatted_content.replace('`', '\\`').replace('\n', '<br>')
-                js_code = """
-                    () => {
-                        const editor = document.querySelector('[contenteditable="true"]');
-                        if (editor) {
-                            editor.innerHTML = `""" + safe_content + """`;
-                            editor.dispatchEvent(new InputEvent('input', {bubbles: true}));
-                            return 'success';
-                        }
-                        return 'editor not found';
-                    }
-                """
-                await page.evaluate(js_code)
-                print("✓ 正文已填充")
+                # 使用 set_input_files 或直接填充
+                # 方案：用 locator 直接填
+                editor = page.locator('[contenteditable="true"]').first
+                if await editor.count() > 0:
+                    await editor.fill(formatted_content)
+                    print("✓ 正文已填充")
+                else:
+                    print("! 未找到编辑器")
             except Exception as e:
                 print(f"! 正文填充失败: {e}")
             
