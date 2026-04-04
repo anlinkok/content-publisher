@@ -114,13 +114,19 @@ class XiaohongshuTool(PlatformTool):
             
             print(f"API 检测响应: {result}")
             
-            if result.get('data') and result.get('data', {}).get('user_id'):
-                return {
-                    'is_authenticated': True,
-                    'user_id': str(result['data']['user_id']),
-                    'username': result['data'].get('nickname', ''),
-                    'avatar': result['data'].get('avatar', ''),
-                }
+            if result and isinstance(result, dict):
+                # 检查 data 是否是字典并且有 user_id
+                data = result.get('data')
+                if isinstance(data, dict) and data.get('user_id'):
+                    return {
+                        'is_authenticated': True,
+                        'user_id': str(data['user_id']),
+                        'username': data.get('nickname', ''),
+                        'avatar': data.get('avatar', ''),
+                    }
+                # 登录过期
+                if result.get('result') == -100 or result.get('code') == -1:
+                    return {'is_authenticated': False, 'error': '登录已过期', 'response': result}
             
             # 方法3: 简单检查是否还在登录页
             current_url = self.page.url
@@ -229,18 +235,18 @@ class XiaohongshuTool(PlatformTool):
         try:
             await self.init_browser()
             
-            # 检查登录
+            # 检查登录 - 小红书cookie过期快，直接尝试发布
             log("检查登录状态...")
-            if not await self.is_logged_in():
+            await self.page.goto('https://creator.xiaohongshu.com/publish/publish')
+            await asyncio.sleep(3)
+            
+            # 检查是否被重定向到登录页
+            current_url = self.page.url
+            if 'login' in current_url:
                 log("未登录，请先运行 login 命令")
                 return ToolResult(success=False, error="未登录")
             
-            log("已登录")
-            
-            # 进入发布页面
-            log("进入发布页面...")
-            await self.page.goto('https://creator.xiaohongshu.com/publish/publish')
-            await asyncio.sleep(3)
+            log("已登录，进入发布页面")
             
             # 处理封面图片上传
             cover_image = getattr(article, 'cover_image', None)
