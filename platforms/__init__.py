@@ -8,6 +8,9 @@ from .wangyi import WangyiTool
 from .qiehao import QiehaoTool
 from .juejin import JuejinTool
 from .csdn import CSDNTool
+from .cnblogs import CnblogsTool
+from .oschina import OschinaTool
+from .segmentfault import SegmentfaultTool
 
 __all__ = [
     'PlatformTool',
@@ -20,4 +23,7 @@ __all__ = [
     'QiehaoTool',
     'JuejinTool',
     'CSDNTool',
+    'CnblogsTool',
+    'OschinaTool',
+    'SegmentfaultTool',
 ]
