@@ -99,6 +99,17 @@ class XiaohongshuTool(PlatformTool):
         if self.playwright:
             await self.playwright.stop()
     
+    async def _screenshot(self, step_name: str):
+        """保存截图用于调试"""
+        try:
+            os.makedirs('data/screenshots', exist_ok=True)
+            timestamp = int(asyncio.get_event_loop().time())
+            path = f'data/screenshots/xiaohongshu_{step_name}_{timestamp}.png'
+            await self.page.screenshot(path=path, full_page=True)
+            print(f"  📸 截图: {path}")
+        except Exception as e:
+            print(f"  ! 截图失败: {e}")
+    
     def _preprocess_content(self, content: str, title: str) -> tuple:
         """内容预处理 - 按 Skill 要求分段"""
         # 小红书标题限制20字
@@ -212,12 +223,14 @@ class XiaohongshuTool(PlatformTool):
             
             # 8. 一键排版 → 选模板 → 下一步
             print("[8/10] 一键排版...")
+            await self._screenshot("before_format")
             try:
                 format_btn = page.get_by_role("button", name="一键排版")
                 if await format_btn.count() > 0:
                     await format_btn.click()
                     await asyncio.sleep(2)
                     print("  ✓ 已点击一键排版")
+                    await self._screenshot("after_format_click")
                     
                     # 选择模板（清晰明朗/逻辑结构）
                     template_names = ["逻辑结构", "清晰明朗", "职场干货"]
@@ -229,8 +242,10 @@ class XiaohongshuTool(PlatformTool):
                             await asyncio.sleep(1)
                             break
                     
+                    await self._screenshot("after_template_select")
+                    
                     # 点击下一步（尝试多种可能的按钮名称）
-                    next_btn_names = ["下一步", "确定", "完成", "应用", "确认"]
+                    next_btn_names = ["下一步", "确定", "完成", "应用", "确认", "使用"]
                     next_clicked = False
                     for btn_name in next_btn_names:
                         try:
@@ -244,10 +259,13 @@ class XiaohongshuTool(PlatformTool):
                         except:
                             continue
                     
+                    await self._screenshot("after_next_click")
+                    
                     if not next_clicked:
                         print("  - 未找到下一步按钮，继续...")
             except Exception as e:
                 print(f"  ! 排版失败: {e}")
+                await self._screenshot("format_error")
             
             # 9. 填写描述（50-100字）
             print("[9/10] 填写描述...")
