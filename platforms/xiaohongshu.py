@@ -262,7 +262,7 @@ class XiaohongshuTool(PlatformTool):
                 return ToolResult(success=False, error="未登录")
             
             log("已登录，进入发布页面...")
-            # 小红书发布页面
+            # 小红书创作者平台 - 选择写长文模式
             await self.page.goto('https://creator.xiaohongshu.com/creator/note/create', wait_until='domcontentloaded')
             log("等待页面加载...")
             await asyncio.sleep(5)
@@ -277,16 +277,28 @@ class XiaohongshuTool(PlatformTool):
                 await self.close()
                 return ToolResult(success=False, error="未登录")
             
-            # 等待编辑器加载
+            # 点击"写长文"选项（如果有的话）
             try:
-                await self.page.wait_for_selector('div[contenteditable="true"]', timeout=10000)
-                log("编辑器加载完成")
+                # 查找写长文按钮
+                long_text_selectors = [
+                    'button:has-text("写长文")',
+                    'div:has-text("写长文")',
+                    '[class*="long"]',
+                    '[data-testid*="long"]',
+                ]
+                for selector in long_text_selectors:
+                    try:
+                        long_text_btn = await self.page.wait_for_selector(selector, timeout=3000)
+                        if long_text_btn:
+                            log(f"找到写长文按钮: {selector}")
+                            await long_text_btn.click()
+                            log("已点击写长文")
+                            await asyncio.sleep(3)
+                            break
+                    except:
+                        continue
             except Exception as e:
-                log(f"编辑器加载超时: {e}")
-                # 截图查看页面状态
-                screenshot_path = f'data/xiaohongshu_publish_{int(asyncio.get_event_loop().time())}.png'
-                await self.page.screenshot(path=screenshot_path, full_page=True)
-                log(f"页面截图已保存: {screenshot_path}")
+                log(f"选择写长文模式失败（可能页面直接进入编辑器）: {e}")
             
             # 小红书发布流程：先上传图片，再填写文字
             # 处理图片上传（小红书必须先有图片）
