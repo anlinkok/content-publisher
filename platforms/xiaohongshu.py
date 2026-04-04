@@ -229,12 +229,23 @@ class XiaohongshuTool(PlatformTool):
                             await asyncio.sleep(1)
                             break
                     
-                    # 点击下一步
-                    next_btn = page.get_by_role("button", name="下一步")
-                    if await next_btn.count() > 0:
-                        await next_btn.click()
-                        print("  ✓ 已点击下一步")
-                        await asyncio.sleep(2)
+                    # 点击下一步（尝试多种可能的按钮名称）
+                    next_btn_names = ["下一步", "确定", "完成", "应用", "确认"]
+                    next_clicked = False
+                    for btn_name in next_btn_names:
+                        try:
+                            next_btn = page.get_by_role("button", name=btn_name).first
+                            if await next_btn.count() > 0 and await next_btn.is_visible():
+                                await next_btn.click()
+                                print(f"  ✓ 已点击: {btn_name}")
+                                next_clicked = True
+                                await asyncio.sleep(2)
+                                break
+                        except:
+                            continue
+                    
+                    if not next_clicked:
+                        print("  - 未找到下一步按钮，继续...")
             except Exception as e:
                 print(f"  ! 排版失败: {e}")
             
@@ -312,13 +323,30 @@ class XiaohongshuTool(PlatformTool):
             except Exception as e:
                 print(f"  ! 原创声明失败: {e}")
             
-            # 发布
-            print("\n准备发布...")
+            # 12. 发布
+            print("\n[12/12] 发布...")
             try:
-                publish_btn = page.get_by_role("button", name="发布")
-                await publish_btn.click()
-                print("✓ 已点击发布")
-                await asyncio.sleep(5)
+                # 尝试多种可能的发布按钮名称
+                publish_btn_names = ["发布", "立即发布", "确认发布", "提交"]
+                publish_clicked = False
+                
+                for btn_name in publish_btn_names:
+                    try:
+                        publish_btn = page.get_by_role("button", name=btn_name).first
+                        if await publish_btn.count() > 0 and await publish_btn.is_visible():
+                            await publish_btn.click()
+                            print(f"  ✓ 已点击: {btn_name}")
+                            publish_clicked = True
+                            await asyncio.sleep(5)
+                            break
+                    except Exception as e:
+                        continue
+                
+                if not publish_clicked:
+                    print("  ! 未找到发布按钮，请手动点击")
+                    await asyncio.sleep(60)
+                    await self.close()
+                    return ToolResult(success=False, error="未找到发布按钮")
                 
                 # 检查成功提示
                 success_indicator = page.locator("text=/发布成功|已发布/")
