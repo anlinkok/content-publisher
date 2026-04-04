@@ -59,10 +59,6 @@ class XiaohongshuTool(PlatformTool):
     async def check_auth(self) -> dict:
         """检查登录状态"""
         try:
-            # 先刷新页面确保状态最新
-            await self.page.goto('https://creator.xiaohongshu.com/')
-            await asyncio.sleep(2)
-            
             result = await self.page.evaluate("""
                 async () => {
                     try {
@@ -81,8 +77,6 @@ class XiaohongshuTool(PlatformTool):
                 }
             """)
             
-            print(f"登录检测响应: {result}")
-            
             if result.get('data') and result.get('data', {}).get('user_id'):
                 return {
                     'is_authenticated': True,
@@ -90,9 +84,8 @@ class XiaohongshuTool(PlatformTool):
                     'username': result['data'].get('nickname', ''),
                     'avatar': result['data'].get('avatar', ''),
                 }
-            return {'is_authenticated': False, 'response': result}
+            return {'is_authenticated': False}
         except Exception as e:
-            print(f"登录检测出错: {e}")
             return {'is_authenticated': False, 'error': str(e)}
     
     async def is_logged_in(self) -> bool:
@@ -105,32 +98,39 @@ class XiaohongshuTool(PlatformTool):
         await self.init_browser(headless=False)
         
         # 打开登录页
+        print("打开小红书登录页面...")
         await self.page.goto('https://creator.xiaohongshu.com/login')
         print("请在浏览器中扫码或输入账号密码登录...")
+        print("登录成功后会自动检测并保存...")
         
-        # 等待登录成功
+        # 等待页面跳转到首页（说明登录成功）
         max_wait = 300  # 5分钟
         for i in range(max_wait):
-            # 每30秒刷新页面再检测（避免页面状态不同步）
-            if i % 10 == 0 and i > 0:
-                print(f"已等待 {i} 秒，刷新页面检测登录状态...")
-                await self.page.goto('https://creator.xiaohongshu.com/')
-                await asyncio.sleep(2)
+            current_url = self.page.url
             
-            if await self.is_logged_in():
-                print("检测到登录成功！")
-                # 保存 Cookie
-                await self.save_cookies()
-                await self.close()
-                return True
+            # 检测到已跳转到首页或其他创作者页面
+            if 'creator.xiaohongshu.com/login' not in current_url and 'creator.xiaohongshu.com' in current_url:
+                print(f"\n检测到页面跳转: {current_url}")
+                print("等待页面加载完成...")
+                await asyncio.sleep(3)  # 等待页面完全加载
+                
+                # 检测登录状态
+                if await self.is_logged_in():
+                    print("✓ 登录成功！")
+                    # 保存 Cookie
+                    await self.save_cookies()
+                    await self.close()
+                    return True
+                else:
+                    print("页面已跳转但登录检测失败，继续等待...")
             
-            # 每10秒显示一次进度
+            # 每10秒显示进度
             if i % 10 == 0 and i > 0:
-                print(f"等待登录中... ({i}/{max_wait}秒)")
+                print(f"等待登录中... 已等待 {i} 秒")
             
             await asyncio.sleep(1)
         
-        print("登录超时，请重试")
+        print("\n登录超时，请重试")
         await self.close()
         return False
     
