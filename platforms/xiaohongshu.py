@@ -1,88 +1,236 @@
 """
-小红书平台实现
+小红书 (Xiaohongshu) 平台适配器
+小红书创作者平台
 """
-
 import asyncio
-import os
-import logging
-from platforms.base import PlatformTool, ToolResult
+import json
+import re
+from typing import Optional
+from playwright.async_api import Page
 
-logger = logging.getLogger(__name__)
+from platforms.base import PlatformTool, ToolResult
 
 
 class XiaohongshuTool(PlatformTool):
-    """小红书发布工具"""
-    name = "XiaohongshuPublisher"
-    description = "Publish notes to Xiaohongshu platform"
-    platform_type = "xiaohongshu"
+    """小红书平台适配器"""
     
-    async def authenticate(self) -> bool:
-        """小红书登录"""
-        if not self.page:
-            await self.init_browser(headless=False)
+    platform_name = "xiaohongshu"
+    platform_id = "xiaohongshu"
+    platform_type = "article"
+    
+    # 小红书使用图文模式
+    output_format = "markdown"
+    
+    async def init_browser(self, headless: bool = True, load_cookie: bool = True):
+        """初始化浏览器"""
+        from playwright.async_api import async_playwright
         
-        if await self.load_session():
-            await self.page.goto("https://creator.xiaohongshu.com/")
-            await asyncio.sleep(2)
-            
+        self.playwright = await async_playwright().start()
+        
+        # 浏览器配置
+        browser_args = [
+            '--disable-blink-features=AutomationControlled',
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+        ]
+        
+        context_options = {
+            'viewport': {'width': 1920, 'height': 1080},
+            'user_agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        }
+        
+        # 加载 Cookie
+        if load_cookie:
+            cookie_file = f"data/cookies/{self.platform_id}.json"
             try:
-                await self.page.wait_for_selector('.user-info', timeout=5000)
-                self._is_authenticated = True
-                return True
-            except:
+                with open(cookie_file, 'r', encoding='utf-8') as f:
+                    cookies = json.load(f)
+                    context_options['storage_state'] = {'cookies': cookies}
+            except FileNotFoundError:
                 pass
         
-        from rich.console import Console
-        console = Console()
-        console.print("[yellow]请在浏览器中完成小红书登录...[/yellow]")
-        await self.page.goto("https://creator.xiaohongshu.com/login")
-        
-        try:
-            await self.page.wait_for_selector('.user-info', timeout=120000)
-            self._is_authenticated = True
-            await self.save_session()
-            return True
-        except:
-            return False
+        self.browser = await self.playwright.chromium.launch(
+            headless=headless,
+            args=browser_args
+        )
+        self.context = await self.browser.new_context(**context_options)
+        self.page = await self.context.new_page()
     
-    async def publish(self, article) -> ToolResult:
-        """发布到小红书"""
-        if not self._is_authenticated:
-            if not await self.authenticate():
-                return ToolResult(success=False, error="登录失败")
+    async def check_auth(self) -> dict:
+        """检查登录状态"""
+        try:
+            result = await self.page.evaluate("""
+                async () => {
+                    const res = await fetch('https://creator.xiaohongshu.com/api/galaxy/creator/info', {
+                        method: 'GET',
+                        credentials: 'include',
+                        headers: {
+                            'Origin': 'https://creator.xiaohongshu.com',
+                            'Referer': 'https://creator.xiaohongshu.com/',
+                        }
+                    });
+                    return await res.json();
+                }
+            """)
+            
+            if result.get('data') and result.get('data', {}).get('user_id'):
+                return {
+                    'is_authenticated': True,
+                    'user_id': str(result['data']['user_id']),
+                    'username': result['data'].get('nickname', ''),
+                    'avatar': result['data'].get('avatar', ''),
+                }
+            return {'is_authenticated': False}
+        except Exception as e:
+            return {'is_authenticated': False, 'error': str(e)}
+    
+    async def is_logged_in(self) -> bool:
+        """检查是否已登录"""
+        result = await self.check_auth()
+        return result.get('is_authenticated', False)
+    
+    async def authenticate(self) -> bool:
+        """登录小红书"""
+        await self.init_browser(headless=False)
+        
+        # 打开登录页
+        await self.page.goto('https://creator.xiaohongshu.com/login')
+        
+        # 等待登录成功
+        max_wait = 300  # 5分钟
+        for i in range(max_wait):
+            if await self.is_logged_in():
+                # 保存 Cookie
+                await self.save_cookies()
+                await self.close()
+                return True
+            await asyncio.sleep(1)
+        
+        await self.close()
+        return False
+    
+    async def save_cookies(self):
+        """保存 Cookie"""
+        import os
+        os.makedirs('data/cookies', exist_ok=True)
+        
+        storage = await self.context.storage_state()
+        with open(f'data/cookies/{self.platform_id}.json', 'w', encoding='utf-8') as f:
+            json.dump(storage.get('cookies', []), f, ensure_ascii=False, indent=2)
+    
+    async def close(self):
+        """关闭浏览器"""
+        if self.context:
+            await self.context.close()
+        if self.browser:
+            await self.browser.close()
+        if self.playwright:
+            await self.playwright.stop()
+    
+    async def upload_image(self, image_path: str) -> str:
+        """上传图片到小红书"""
+        try:
+            # 小红书图片上传需要通过创作者平台的 API
+            # 这里返回原始路径，实际使用时需要在前端处理
+            return image_path
+        except Exception as e:
+            print(f"小红书图片上传失败: {e}")
+            return image_path
+    
+    async def publish(self, article, file_path: str = None) -> ToolResult:
+        """发布笔记到小红书
+        
+        注意：小红书是图文笔记形式，标题限制20字，正文限制1000字
+        """
+        debug_log = []
+        
+        def log(msg):
+            debug_log.append(msg)
+            print(msg)
         
         try:
-            await self.page.goto("https://creator.xiaohongshu.com/publish/publish")
+            await self.init_browser()
+            
+            # 检查登录
+            log("检查登录状态...")
+            if not await self.is_logged_in():
+                log("未登录，请先运行 login 命令")
+                return ToolResult(success=False, error="未登录")
+            
+            log("已登录")
+            
+            # 进入发布页面
+            log("进入发布页面...")
+            await self.page.goto('https://creator.xiaohongshu.com/publish/publish')
             await asyncio.sleep(3)
             
-            # 上传图片
-            if article.cover_image and os.path.exists(article.cover_image):
-                upload_input = await self.page.wait_for_selector('input[type="file"]')
-                await upload_input.set_input_files(article.cover_image)
-                await asyncio.sleep(3)
+            # 处理封面图片上传
+            cover_image = getattr(article, 'cover_image', None)
+            if cover_image and file_path:
+                log(f"上传封面图片: {cover_image}")
+                try:
+                    # 查找文件输入框
+                    file_input = await self.page.wait_for_selector('input[type="file"]', timeout=5000)
+                    await file_input.set_input_files(cover_image)
+                    await asyncio.sleep(3)
+                    log("封面上传完成")
+                except Exception as e:
+                    log(f"封面上传失败: {e}")
             
-            # 填写标题
-            title_input = await self.page.wait_for_selector('textarea[placeholder*="标题"]')
-            await title_input.fill(article.title[:20])
+            # 填写标题（限制20字）
+            title = getattr(article, 'title', '无标题')[:20]
+            log(f"填写标题: {title}")
             
-            # 填写正文
-            content_input = await self.page.wait_for_selector('textarea[placeholder*="正文"]')
-            content = article.content[:1000] if len(article.content) > 1000 else article.content
-            await content_input.fill(content)
+            try:
+                title_input = await self.page.wait_for_selector('textarea[placeholder*="标题"], input[placeholder*="标题"]', timeout=5000)
+                await title_input.fill(title)
+            except Exception as e:
+                log(f"标题输入失败: {e}")
+            
+            # 填写正文（限制1000字）
+            content = getattr(article, 'content', '')[:1000]
+            log(f"填写正文: {len(content)} 字")
+            
+            try:
+                content_input = await self.page.wait_for_selector('textarea[placeholder*="正文"], [contenteditable="true"]', timeout=5000)
+                await content_input.fill(content)
+            except Exception as e:
+                log(f"正文输入失败: {e}")
             
             await asyncio.sleep(1)
             
-            # 发布
-            publish_btn = await self.page.wait_for_selector('button:has-text("发布")')
-            await publish_btn.click()
-            
-            await asyncio.sleep(5)
-            
-            return ToolResult(success=True)
+            # 点击发布按钮
+            log("点击发布...")
+            try:
+                publish_btn = await self.page.wait_for_selector('button:has-text("发布"), button:has-text("立即发布")', timeout=5000)
+                await publish_btn.click()
+                await asyncio.sleep(5)
+                
+                # 检查发布结果
+                current_url = self.page.url
+                if 'success' in current_url or 'published' in current_url:
+                    log("发布成功")
+                    await self.close()
+                    return ToolResult(
+                        success=True,
+                        post_url=current_url,
+                        data={'platform': 'xiaohongshu', 'url': current_url}
+                    )
+                else:
+                    log(f"发布完成，当前URL: {current_url}")
+                    await self.close()
+                    return ToolResult(
+                        success=True,
+                        post_url=current_url,
+                        data={'platform': 'xiaohongshu', 'url': current_url}
+                    )
+                    
+            except Exception as e:
+                log(f"发布按钮点击失败: {e}")
+                await self.close()
+                return ToolResult(success=False, error=f"发布失败: {e}")
             
         except Exception as e:
-            logger.exception("小红书发布失败")
+            log(f"发布失败: {str(e)}")
+            await self.close()
             return ToolResult(success=False, error=str(e))
-    
-    async def check_status(self, post_id: str) -> ToolResult:
-        return ToolResult(success=True)

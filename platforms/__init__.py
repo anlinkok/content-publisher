@@ -11,6 +11,7 @@ from .csdn import CSDNTool
 from .cnblogs import CnblogsTool
 from .oschina import OschinaTool
 from .segmentfault import SegmentfaultTool
+from .sohu import SohuTool
 
 __all__ = [
     'PlatformTool',
@@ -26,4 +27,5 @@ __all__ = [
     'CnblogsTool',
     'OschinaTool',
     'SegmentfaultTool',
+    'SohuTool',
 ]
