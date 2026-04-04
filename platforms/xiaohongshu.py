@@ -1,5 +1,5 @@
 """
-小红书 (Xiaohongshu) 平台适配器 - 简化版，只填充内容不发布
+小红书 (Xiaohongshu) 平台适配器 - 基于 Codegen 录制
 """
 import asyncio
 import json
@@ -11,7 +11,7 @@ from platforms.base import PlatformTool, ToolResult
 
 
 class XiaohongshuTool(PlatformTool):
-    """小红书平台适配器 - 简化版"""
+    """小红书平台适配器 - 基于真实录制"""
     
     platform_name = "xiaohongshu"
     platform_id = "xiaohongshu"
@@ -115,7 +115,7 @@ class XiaohongshuTool(PlatformTool):
             await self.playwright.stop()
     
     async def publish(self, article, file_path: str = None) -> ToolResult:
-        """打开小红书编辑器，上传文档并填充内容（不自动发布）"""
+        """发布到小红书 - 基于 Codegen 录制的精确流程"""
         try:
             await self.init_browser(headless=False)
             
@@ -124,90 +124,116 @@ class XiaohongshuTool(PlatformTool):
                 return ToolResult(success=False, error="未登录")
             
             print("✓ 已登录")
-            print("\n========== 开始填充内容（请手动点击最终发布）==========\n")
+            print("\n========== 小红书自动发布 ==========\n")
+            
+            page = self.page
             
             # Step 1: 进入发布页面
-            print("Step 1: 打开发布页面...")
-            await self.page.goto('https://creator.xiaohongshu.com/new/home')
-            await asyncio.sleep(3)
+            print("Step 1: 打开创作者中心...")
+            await page.goto("https://creator.xiaohongshu.com/new/home")
+            await asyncio.sleep(2)
             
             # Step 2: 点击发布笔记
             print("Step 2: 点击发布笔记...")
-            try:
-                await self.page.get_by_text("发布笔记").first.click()
-                await asyncio.sleep(3)
-            except:
-                pass
+            await page.get_by_text("发布笔记").click()
+            await asyncio.sleep(2)
             
             # Step 3: 选择写长文
             print("Step 3: 选择写长文...")
-            try:
-                await self.page.get_by_text("写长文").first.click()
-                await asyncio.sleep(3)
-            except Exception as e:
-                print(f"选择写长文失败: {e}")
+            await page.get_by_text("写长文").click()
+            await asyncio.sleep(2)
             
             # Step 4: 点击新的创作
             print("Step 4: 点击新的创作...")
-            try:
-                await self.page.get_by_role("button", name="新的创作").first.click()
-                await asyncio.sleep(3)
-            except Exception as e:
-                print(f"点击新的创作失败: {e}")
+            await page.get_by_role("button", name="新的创作").click()
+            await asyncio.sleep(2)
             
-            # Step 5: 上传 Word 文件
-            if file_path:
+            # Step 5: 上传 Word 文件（关键：Codegen 发现直接在 body 上 set_input_files）
+            if file_path and os.path.exists(file_path):
                 print(f"Step 5: 上传文件 {os.path.basename(file_path)}...")
-                print("请手动点击导入按钮并选择文件，或等待自动上传...")
                 
-                # 等待30秒让用户手动操作或自动检测
-                print("等待30秒，你可以：")
-                print("  1. 手动点击导入按钮上传文件")
-                print("  2. 等待程序尝试自动检测上传框")
-                await asyncio.sleep(5)
+                # 先点击导入按钮
+                print("  - 点击导入按钮...")
+                await page.locator(".isFromFileRed").click()
+                await asyncio.sleep(1)
                 
-                # 尝试自动上传
-                try:
-                    # 点击导入按钮
-                    await self.page.locator(".isFromFileRed").click()
-                    await asyncio.sleep(2)
-                    
-                    # 找 file input
-                    file_inputs = await self.page.locator('input[type="file"]').all()
-                    print(f"检测到 {len(file_inputs)} 个上传框")
-                    
-                    for inp in file_inputs:
-                        try:
-                            await inp.set_input_files(file_path)
-                            print("✓ 文件已上传，等待解析...")
-                            await asyncio.sleep(10)  # 等待解析
-                            break
-                        except:
-                            continue
-                except Exception as e:
-                    print(f"自动上传失败: {e}")
-                    print("请手动完成上传")
+                # 点击上传区域
+                print("  - 点击上传区域...")
+                # 使用 nth(3) 因为页面上可能有多个匹配的元素
+                upload_divs = await page.locator("div").filter(has_text="点击或拖拽上传").all()
+                if len(upload_divs) > 3:
+                    await upload_divs[3].click()
+                else:
+                    # 尝试点击第一个
+                    try:
+                        await page.locator("div").filter(has_text="点击或拖拽上传").first.click()
+                    except:
+                        pass
+                await asyncio.sleep(1)
+                
+                # 关键：在 body 上设置文件
+                print("  - 设置文件...")
+                await page.locator("body").set_input_files(file_path)
+                print("  ✓ 文件已上传，等待解析...")
+                await asyncio.sleep(10)  # 等待解析
             
-            # Step 6: 等待用户完成
+            # Step 6: 填写标题
+            print("Step 6: 填写标题...")
+            if article and hasattr(article, 'title') and article.title:
+                title = article.title
+            else:
+                title = os.path.splitext(os.path.basename(file_path or ""))[0]
+            
+            title_input = page.get_by_role("textbox", name="输入标题")
+            await title_input.click()
+            await title_input.fill(title)
+            print(f"  ✓ 标题: {title}")
+            
+            # Step 7: 检查是否有"一键排版"按钮
+            print("Step 7: 检查一键排版...")
+            try:
+                format_btn = page.get_by_role("button", name="一键排版")
+                if await format_btn.count() > 0:
+                    await format_btn.click()
+                    await asyncio.sleep(2)
+                    print("  ✓ 已点击一键排版")
+                    
+                    # 选择样式（如果有）
+                    try:
+                        clear_style = page.get_by_text("清晰明朗")
+                        if await clear_style.count() > 0:
+                            await clear_style.click()
+                            await asyncio.sleep(1)
+                    except:
+                        pass
+            except:
+                print("  - 一键排版按钮未找到或不需要")
+            
+            # Step 8: 长文模式可能没有下一步，直接等待用户发布
             print("\n========================================")
-            print("✓ 编辑器已打开，请：")
-            print("  1. 确认内容已填充")
-            print("  2. 检查标题和正文")
-            print("  3. 点击【保存草稿】或【发布】")
+            print("✓ 内容已填充完成")
+            print(f"  标题: {title}")
+            print("  请检查：")
+            print("    1. 文档是否已正确解析")
+            print("    2. 标题是否正确")
+            print("    3. 图片是否正常显示")
+            print("  然后点击【发布】或【保存草稿】")
             print("========================================\n")
             
             # 保持浏览器打开，让用户手动操作
-            print("浏览器将保持打开5分钟，你可以手动操作...")
-            await asyncio.sleep(300)  # 5分钟
+            print("浏览器将保持打开5分钟...")
+            await asyncio.sleep(300)
             
             await self.close()
             return ToolResult(
                 success=True,
-                data={'platform': 'xiaohongshu', 'note': '已在浏览器中打开编辑器，请手动完成发布'}
+                data={'platform': 'xiaohongshu', 'title': title, 'note': '内容已填充，请手动发布'}
             )
             
         except Exception as e:
             print(f"错误: {e}")
+            import traceback
+            traceback.print_exc()
             await self.close()
             return ToolResult(success=False, error=str(e))
     
