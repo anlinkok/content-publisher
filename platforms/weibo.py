@@ -477,13 +477,55 @@ class WeiboTool(PlatformTool):
             draft_url = f"https://card.weibo.com/article/v5/editor#/draft/{post_id}"
             log(f"草稿保存成功: {draft_url}")
             
+            # 真正发布（默认尝试发布）
+            draft_only = getattr(article, 'draft_only', False)  # 默认直接发布
+            if not draft_only:
+                log("正在发布文章...")
+                publish_req_id = self.generate_req_id()
+                
+                publish_result = await self.page.evaluate(f"""
+                    async () => {{
+                        const res = await fetch('https://card.weibo.com/article/v5/aj/editor/draft/publish?uid={config['uid']}&id={post_id}&_rid={publish_req_id}', {{
+                            method: 'POST',
+                            credentials: 'include',
+                            headers: {{
+                                'Content-Type': 'application/x-www-form-urlencoded',
+                                'accept': 'application/json, text/plain, */*',
+                                'SN-REQID': '{publish_req_id}',
+                            }},
+                            body: new URLSearchParams({{
+                                'id': '{post_id}',
+                                'from': 'draft'
+                            }}),
+                        }});
+                        return await res.json();
+                    }}
+                """)
+                
+                log(f"发布响应: {publish_result}")
+                
+                pub_code = str(publish_result.get('code', ''))
+                if pub_code == '100000':
+                    log("发布成功！")
+                    published_url = f"https://card.weibo.com/article/m/show/id/{post_id}"
+                    await self.close()
+                    return ToolResult(
+                        success=True,
+                        post_id=post_id,
+                        post_url=published_url,
+                        data={'platform': 'weibo', 'published': True, 'url': published_url}
+                    )
+                else:
+                    log(f"发布失败: {publish_result.get('msg', '未知错误')}")
+                    # 返回草稿链接，让用户手动发布
+            
             await self.close()
             
             return ToolResult(
                 success=True,
                 post_id=post_id,
                 post_url=draft_url,
-                data={'platform': 'weibo', 'draft_url': draft_url}
+                data={'platform': 'weibo', 'draft_url': draft_url, 'published': False, 'note': '已保存到草稿箱，请手动点击发布'}
             )
             
         except Exception as e:
