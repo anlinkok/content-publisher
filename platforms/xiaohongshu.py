@@ -149,27 +149,16 @@ class XiaohongshuTool(PlatformTool):
             
             # 检测到已跳转到首页或其他创作者页面
             if 'creator.xiaohongshu.com/login' not in current_url and 'creator.xiaohongshu.com' in current_url:
-                print(f"\n检测到页面跳转: {current_url}")
-                print("等待页面加载完成...")
-                await asyncio.sleep(3)  # 等待页面完全加载
+                print(f"\n✓ 检测到页面跳转: {current_url}")
+                print("页面已从登录页跳转，说明登录成功！")
+                print("等待3秒后保存Cookie...")
+                await asyncio.sleep(3)
                 
-                # 检测登录状态
-                auth_result = await self.check_auth()
-                if auth_result.get('is_authenticated'):
-                    print(f"✓ 登录成功！用户: {auth_result.get('username', 'unknown')}")
-                    # 保存 Cookie
-                    await self.save_cookies()
-                    await self.close()
-                    return True
-                else:
-                    print(f"登录检测详情: {auth_result}")
-                    # 如果页面已跳转，大概率已登录，直接保存
-                    if 'login' not in current_url:
-                        print("✓ 页面已跳转，假设登录成功，保存Cookie...")
-                        await self.save_cookies()
-                        await self.close()
-                        return True
-                    print("页面已跳转但登录检测失败，继续等待...")
+                # 直接保存Cookie（页面跳转说明已登录）
+                await self.save_cookies()
+                print("✓ Cookie保存成功！")
+                await self.close()
+                return True
             
             # 每10秒显示进度
             if i % 10 == 0 and i > 0:
