@@ -68,8 +68,8 @@ class WeiboTool(PlatformTool):
             return self.user_config
         
         # 访问编辑器页面
-        await self.page.goto('https://card.weibo.com/article/v5/editor', wait_until='domcontentloaded')
-        await asyncio.sleep(2)
+        await self.page.goto('https://card.weibo.com/article/v5/editor', wait_until='networkidle')
+        await asyncio.sleep(3)  # 等待页面完全加载
         
         html = await self.page.content()
         
