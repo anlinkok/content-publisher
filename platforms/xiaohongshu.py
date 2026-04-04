@@ -245,32 +245,30 @@ class XiaohongshuTool(PlatformTool):
                     # 现在查找文件输入框
                     file_input = await self.page.wait_for_selector('input[type="file"]', timeout=10000)
                     await file_input.set_input_files(file_path)
-                    log(f"✓ 已选择文件，等待上传...")
-                    await asyncio.sleep(8)  # 等待上传和解析
+                    log(f"✓ 已选择文件，等待解析...")
+                    await asyncio.sleep(10)  # 等待上传和解析完成
                     
                     # 关闭可能弹出的上传成功提示/对话框
                     try:
-                        # 点击空白处或关闭按钮
                         await self.page.keyboard.press("Escape")
                         await asyncio.sleep(1)
-                        # 或者点击蒙层关闭
-                        modal_close = await self.page.query_selector('.d-modal-mask, .modal-close, [class*="close"]')
-                        if modal_close:
-                            await modal_close.click()
-                            await asyncio.sleep(1)
                     except:
                         pass
                     
+                    log("✓ 文件上传并解析完成")
                 except Exception as e:
                     log(f"文件上传失败: {e}")
             
-            # Step 5: 填写标题
+            # Step 5: 填写标题（覆盖自动解析的标题）
             title = getattr(article, 'title', '')[:20]
             if title:
                 log(f"Step 5: 填写标题: {title}")
                 try:
+                    # 先清空自动解析的标题，再填入新标题
                     title_input = self.page.locator('[placeholder*="标题"]').first
-                    await title_input.fill(title)
+                    await title_input.click()
+                    await title_input.fill("")  # 清空
+                    await title_input.fill(title)  # 填入新标题
                     log("✓ 标题填写完成")
                 except Exception as e:
                     log(f"标题填写失败: {e}")
@@ -278,15 +276,15 @@ class XiaohongshuTool(PlatformTool):
             # Step 6: 一键排版
             log("Step 6: 一键排版...")
             try:
-                # 先确保页面可交互（等待任何遮挡层消失）
+                # 等待页面稳定
                 await asyncio.sleep(2)
                 
-                # 尝试点击一键排版，如果被遮挡就强制点击
-                one_click_btn = self.page.get_by_role("button", name="一键排版")
+                # 尝试点击一键排版
+                one_click_btn = self.page.get_by_role("button", name="一键排版").first
                 try:
                     await one_click_btn.click(timeout=5000)
                 except:
-                    # 强制点击（绕过遮挡）
+                    # 强制点击
                     await one_click_btn.evaluate("el => el.click()")
                 
                 log("✓ 已点击一键排版")
