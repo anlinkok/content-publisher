@@ -210,74 +210,107 @@ class XiaohongshuTool(PlatformTool):
             except Exception as e:
                 print(f"! 正文填充失败: {e}")
             
-            # 8. 一键排版
+            # 8. 一键排版 → 选模板 → 下一步
             print("[8/10] 一键排版...")
             try:
                 format_btn = page.get_by_role("button", name="一键排版")
                 if await format_btn.count() > 0:
                     await format_btn.click()
                     await asyncio.sleep(2)
+                    print("  ✓ 已点击一键排版")
                     
-                    # 选择逻辑结构模板
-                    template = page.get_by_text("逻辑结构")
-                    if await template.count() > 0:
-                        await template.click()
-                        print("✓ 已选择逻辑结构模板")
-                    await asyncio.sleep(2)
+                    # 选择模板（清晰明朗/逻辑结构）
+                    template_names = ["逻辑结构", "清晰明朗", "职场干货"]
+                    for tmpl_name in template_names:
+                        template = page.get_by_text(tmpl_name).first
+                        if await template.count() > 0:
+                            await template.click()
+                            print(f"  ✓ 已选择模板: {tmpl_name}")
+                            await asyncio.sleep(1)
+                            break
+                    
+                    # 点击下一步
+                    next_btn = page.get_by_role("button", name="下一步")
+                    if await next_btn.count() > 0:
+                        await next_btn.click()
+                        print("  ✓ 已点击下一步")
+                        await asyncio.sleep(2)
             except Exception as e:
-                print(f"! 排版失败: {e}")
+                print(f"  ! 排版失败: {e}")
             
-            # 9. 添加标签
-            print("[9/10] 添加标签...")
+            # 9. 填写描述（50-100字）
+            print("[9/10] 填写描述...")
+            try:
+                desc_input = page.get_by_placeholder("添加正文描述").first
+                if await desc_input.count() > 0:
+                    desc_text = description[:80] if len(description) > 80 else description
+                    await desc_input.fill(desc_text)
+                    print(f"  ✓ 描述: {desc_text[:30]}...")
+                    await asyncio.sleep(1)
+            except Exception as e:
+                print(f"  ! 描述填写失败: {e}")
+            
+            # 10. 添加标签
+            print("[10/10] 添加标签...")
             try:
                 # 智能提取标签
                 tags = []
-                if "AI" in content or "人工智能" in content:
-                    tags.extend(["#AI", "#人工智能"])
-                if "就业" in content or "工作" in content:
-                    tags.extend(["#就业", "#职场"])
-                if "2026" in content or "未来" in content:
-                    tags.extend(["#未来趋势", "#科技改变生活"])
+                content_lower = (title + content).lower()
+                if any(k in content_lower for k in ["ai", "人工智能", "智能"]):
+                    tags.extend(["AI", "人工智能"])
+                if any(k in content_lower for k in ["就业", "工作", "职场"]):
+                    tags.extend(["职场干货", "就业指导"])
+                if any(k in content_lower for k in ["2026", "未来", "趋势"]):
+                    tags.extend(["未来趋势", "科技改变生活"])
                 if not tags:
-                    tags = ["#干货分享", "#职场干货", "#AI时代"]
+                    tags = ["干货分享", "职场干货", "AI时代"]
                 
                 # 点击话题按钮
-                topic_btn = page.get_by_role("button", name="话题")
+                topic_btn = page.get_by_role("button", name="话题").first
                 if await topic_btn.count() > 0:
                     await topic_btn.click()
                     await asyncio.sleep(1)
                     
                     # 输入标签
-                    for tag in tags[:6]:  # 最多6个标签
+                    for tag in tags[:6]:
                         try:
-                            tag_input = page.get_by_placeholder("搜索话题")
-                            await tag_input.fill(tag.replace('#', ''))
-                            await asyncio.sleep(1)
-                            # 点击第一个推荐
-                            first_tag = page.locator("[class*='topic'], [class*='tag']").first
-                            if await first_tag.count() > 0:
-                                await first_tag.click()
-                                await asyncio.sleep(0.5)
+                            tag_input = page.get_by_placeholder("搜索话题").first
+                            if await tag_input.count() > 0:
+                                await tag_input.fill(tag)
+                                await asyncio.sleep(1)
+                                # 点击第一个推荐标签
+                                first_tag = page.locator("[class*='topic'], [class*='tag']").first
+                                if await first_tag.count() > 0:
+                                    await first_tag.click()
+                                    await asyncio.sleep(0.5)
                         except:
                             pass
-                    print(f"✓ 已添加标签: {tags}")
+                    print(f"  ✓ 标签: {tags}")
             except Exception as e:
-                print(f"! 标签添加失败: {e}")
+                print(f"  ! 标签添加失败: {e}")
             
-            # 10. 原创声明
-            print("[10/10] 原创声明...")
+            # 11. 原创声明
+            print("[11/11] 原创声明...")
             try:
-                original_checkbox = page.locator("input[type='checkbox']").filter(has_text="原创")
+                # 找包含"原创"的复选框或按钮
+                original_checkbox = page.locator("input[type='checkbox']").locator("xpath=../..").filter(has_text="原创").first
+                if await original_checkbox.count() == 0:
+                    # 尝试直接找文本
+                    original_checkbox = page.get_by_text("声明原创").first
+                
                 if await original_checkbox.count() > 0:
                     await original_checkbox.click()
+                    print("  ✓ 已点击原创声明")
                     await asyncio.sleep(1)
-                    # 确认弹窗
-                    confirm = page.get_by_role("button", name="声明原创")
-                    if await confirm.count() > 0:
-                        await confirm.click()
-                        print("✓ 已声明原创")
+                    
+                    # 确认弹窗（如果有）
+                    confirm_btn = page.get_by_role("button", name=re.compile("声明|确认|确定")).first
+                    if await confirm_btn.count() > 0:
+                        await confirm_btn.click()
+                        print("  ✓ 已确认原创声明")
+                        await asyncio.sleep(1)
             except Exception as e:
-                print(f"! 原创声明失败: {e}")
+                print(f"  ! 原创声明失败: {e}")
             
             # 发布
             print("\n准备发布...")
