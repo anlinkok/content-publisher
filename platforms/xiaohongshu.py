@@ -121,7 +121,13 @@ class XiaohongshuTool(PlatformTool):
             
             print("检查登录状态...")
             if not await self.is_logged_in():
-                return ToolResult(success=False, error="未登录")
+                print("未登录，请先登录...")
+                await self.close()
+                login_success = await self.authenticate()
+                if not login_success:
+                    return ToolResult(success=False, error="登录失败")
+                # 重新初始化浏览器
+                await self.init_browser(headless=False)
             
             print("✓ 已登录")
             print("\n========== 小红书自动发布 ==========\n")
