@@ -199,11 +199,13 @@ class XiaohongshuTool(PlatformTool):
             # 7. 填充正文（使用 evaluate 注入）
             print("[7/10] 填写正文...")
             try:
+                # 预处理内容，避免 f-string 中不能有反斜杠
+                safe_content = formatted_content.replace('`', '\\`').replace('\n', '<br>')
                 await page.evaluate(f"""
                     () => {{
                         const editor = document.querySelector('[contenteditable="true"]');
                         if (editor) {{
-                            editor.innerHTML = `{formatted_content.replace('`', '\\`').replace('\n', '<br>')}`;
+                            editor.innerHTML = `{safe_content}`;
                             editor.dispatchEvent(new InputEvent('input', {{bubbles: true}}));
                             return 'success';
                         }}
