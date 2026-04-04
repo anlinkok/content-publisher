@@ -490,3 +490,51 @@ class WeiboTool(PlatformTool):
             log(f"发布失败: {str(e)}")
             await self.close()
             return ToolResult(success=False, error=str(e))
+    
+    async def check_status(self, post_id: str) -> dict:
+        """检查文章发布状态"""
+        try:
+            await self.init_browser()
+            
+            if not await self.is_logged_in():
+                return {'success': False, 'error': '未登录'}
+            
+            config = await self.get_user_config()
+            uid = config.get('uid') if config else ''
+            
+            # 查询草稿状态
+            req_id = self.generate_req_id()
+            result = await self.page.evaluate(f"""
+                async () => {{
+                    const res = await fetch('https://card.weibo.com/article/v5/aj/editor/draft/list?uid={uid}&page=1&_rid={req_id}', {{
+                        method: 'GET',
+                        credentials: 'include',
+                        headers: {{
+                            'accept': 'application/json, text/plain, */*',
+                            'SN-REQID': '{req_id}',
+                        }},
+                    }});
+                    return await res.json();
+                }}
+            """)
+            
+            await self.close()
+            
+            if result and result.get('code') == 100000:
+                drafts = result.get('data', {}).get('list', [])
+                for draft in drafts:
+                    if str(draft.get('id')) == post_id:
+                        return {
+                            'success': True,
+                            'status': draft.get('status'),  # 0:草稿, 1:已发布
+                            'title': draft.get('title'),
+                            'url': f"https://card.weibo.com/article/v5/editor#/draft/{post_id}",
+                        }
+                
+                return {'success': False, 'error': '未找到该文章'}
+            
+            return {'success': False, 'error': result.get('msg', '查询失败')}
+            
+        except Exception as e:
+            await self.close()
+            return {'success': False, 'error': str(e)}

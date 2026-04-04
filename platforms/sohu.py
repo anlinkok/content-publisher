@@ -309,3 +309,47 @@ class SohuTool(PlatformTool):
             log(f"发布失败: {str(e)}")
             await self.close()
             return ToolResult(success=False, error=str(e))
+    
+    async def check_status(self, post_id: str) -> dict:
+        """检查文章发布状态"""
+        try:
+            await self.init_browser()
+            
+            if not await self.is_logged_in():
+                return {'success': False, 'error': '未登录'}
+            
+            # 搜狐号草稿状态检查
+            account_id = self.account_info.get('id') if self.account_info else ''
+            
+            result = await self.page.evaluate(f"""
+                async () => {{
+                    const res = await fetch('https://mp.sohu.com/mpbp/bp/news/v4/news/draft/list?accountId={account_id}&page=1', {{
+                        method: 'GET',
+                        credentials: 'include',
+                        headers: {{
+                            'X-Requested-With': 'XMLHttpRequest',
+                        }},
+                    }});
+                    return await res.json();
+                }}
+            """)
+            
+            await self.close()
+            
+            if result and result.get('success'):
+                drafts = result.get('data', {}).get('list', [])
+                for draft in drafts:
+                    if str(draft.get('id')) == post_id:
+                        return {{
+                            'success': True,
+                            'status': draft.get('contentStatus'),  # 0:草稿, 1:审核中, 2:已发布
+                            'title': draft.get('title'),
+                            'url': f"https://mp.sohu.com/mpfe/v4/contentManagement/news/addarticle?contentStatus=2&id={post_id}",
+                        }}
+                return {'success': False, 'error': '未找到该文章'}
+            
+            return {'success': False, 'error': '查询失败'}
+            
+        except Exception as e:
+            await self.close()
+            return {'success': False, 'error': str(e)}

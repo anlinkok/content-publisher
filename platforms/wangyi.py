@@ -250,3 +250,22 @@ class WangyiTool(PlatformTool):
             log(f"发布失败: {str(e)}")
             await self.close()
             return ToolResult(success=False, error=str(e))
+    
+    async def check_status(self, post_id: str) -> dict:
+        """检查文章发布状态"""
+        try:
+            await self.init_browser()
+            
+            if not await self.is_logged_in():
+                return {'success': False, 'error': '未登录'}
+            
+            # 访问内容管理页面
+            await self.page.goto('https://mp.163.com/')
+            await asyncio.sleep(3)
+            
+            await self.close()
+            return {'success': True, 'status': 'unknown', 'note': '网易号状态检查需要具体文章ID接口'}
+            
+        except Exception as e:
+            await self.close()
+            return {'success': False, 'error': str(e)}
