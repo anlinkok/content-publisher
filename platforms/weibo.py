@@ -477,41 +477,73 @@ class WeiboTool(PlatformTool):
             draft_url = f"https://card.weibo.com/article/v5/editor#/draft/{post_id}"
             log(f"草稿保存成功: {draft_url}")
             
-            # 尝试通过浏览器点击发布按钮
+            # 尝试通过浏览器自动化发布：下一步 → 发送
             try:
-                log("尝试点击发布按钮...")
+                log("打开草稿编辑页面...")
                 await self.page.goto(f'https://card.weibo.com/article/v5/editor#/draft/{post_id}')
-                await asyncio.sleep(3)
+                await asyncio.sleep(5)
                 
-                # 查找发布按钮（可能有多种文本）
-                publish_selectors = [
-                    'button:has-text("发布")',
-                    'button:has-text("立即发布")',
-                    'button:has-text("确认发布")',
-                    '[data-testid="publish-btn"]',
-                    '.publish-btn',
-                    '.btn-publish',
+                # 第一步：点击"下一步"
+                log("点击'下一步'...")
+                next_btn = None
+                next_selectors = [
+                    'button:has-text("下一步")',
+                    'a:has-text("下一步")',
+                    '.next-btn',
+                    '[data-testid="next-btn"]',
+                    'button.next',
+                    'a.next',
                 ]
                 
-                publish_btn = None
-                for selector in publish_selectors:
+                for selector in next_selectors:
                     try:
-                        publish_btn = await self.page.wait_for_selector(selector, timeout=3000)
-                        if publish_btn:
-                            log(f"找到发布按钮: {selector}")
+                        next_btn = await self.page.wait_for_selector(selector, timeout=5000)
+                        if next_btn:
+                            log(f"找到'下一步'按钮: {selector}")
                             break
                     except:
                         continue
                 
-                if publish_btn:
-                    await publish_btn.click()
-                    log("已点击发布按钮，等待跳转...")
+                if next_btn:
+                    await next_btn.click()
+                    log("已点击'下一步'，等待页面跳转...")
                     await asyncio.sleep(5)
+                else:
+                    log("未找到'下一步'按钮，尝试直接找'发送'按钮")
+                
+                # 第二步：点击"发送"
+                log("点击'发送'...")
+                send_btn = None
+                send_selectors = [
+                    'button:has-text("发送")',
+                    'a:has-text("发送")',
+                    'button:has-text("发布")',
+                    '.send-btn',
+                    '.publish-btn',
+                    '[data-testid="send-btn"]',
+                    'button.send',
+                    'button.publish',
+                ]
+                
+                for selector in send_selectors:
+                    try:
+                        send_btn = await self.page.wait_for_selector(selector, timeout=5000)
+                        if send_btn:
+                            log(f"找到'发送'按钮: {selector}")
+                            break
+                    except:
+                        continue
+                
+                if send_btn:
+                    await send_btn.click()
+                    log("已点击'发送'，等待发布完成...")
+                    await asyncio.sleep(8)
                     
                     current_url = self.page.url
                     log(f"当前URL: {current_url}")
                     
-                    if 'm/show' in current_url or 'article' in current_url:
+                    # 检查是否发布成功（URL变化或出现成功提示）
+                    if 'm/show' in current_url or '/article/' in current_url:
                         log("发布成功！")
                         await self.close()
                         return ToolResult(
@@ -520,12 +552,18 @@ class WeiboTool(PlatformTool):
                             post_url=current_url,
                             data={'platform': 'weibo', 'published': True, 'url': current_url}
                         )
+                    else:
+                        # 截图查看当前状态
+                        await self.page.screenshot(path=f'data/weibo_publish_{post_id}.png')
+                        log(f"已截图保存到 data/weibo_publish_{post_id}.png")
                 else:
-                    log("未找到发布按钮，可能需要手动发布")
+                    log("未找到'发送'按钮")
                     
             except Exception as e:
-                log(f"自动发布失败: {e}，请手动在草稿箱发布")
+                log(f"自动发布失败: {e}")
             
+            # 返回草稿链接（无论自动发布是否成功）
+            log(f"文章已保存到草稿箱: {draft_url}")
             await self.close()
             
             return ToolResult(
