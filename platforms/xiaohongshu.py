@@ -225,25 +225,25 @@ class XiaohongshuTool(PlatformTool):
                 await self.close()
                 return ToolResult(success=False, error=f"点击新的创作失败: {e}")
             
-            # Step 4: 上传 Word 文件（参考 Codegen 录制）
+            # Step 4: 上传 Word 文件
             if file_path:
                 log(f"Step 4: 上传文件 {file_path}...")
                 upload_success = False
                 try:
-                    # 先点击上传按钮（参考 Codegen）
-                    log("点击上传按钮...")
-                    await self.page.locator(".isFromFileRed").click()
+                    # 点击包含导入SVG的按钮（根据你提供的path）
+                    log("点击导入按钮...")
+                    try:
+                        # 通过SVG path定位
+                        await self.page.locator('svg path[d*="M13.4287 1.72845"]').click()
+                        log("✓ 已点击导入按钮（通过SVG）")
+                    except:
+                        # 备用：点击文字
+                        await self.page.locator(".isFromFileRed").click()
+                        log("✓ 已点击导入按钮（备用）")
+                    
                     await asyncio.sleep(2)
                     
-                    # 点击拖拽上传区域
-                    try:
-                        await self.page.locator("div").filter(has_text=re.compile(r"点击或拖拽上传")).first.click()
-                        log("✓ 已点击上传区域")
-                        await asyncio.sleep(2)
-                    except:
-                        pass
-                    
-                    # 现在找 file input
+                    # 找 file input
                     file_inputs = await self.page.locator('input[type="file"]').all()
                     log(f"找到 {len(file_inputs)} 个 file input")
                     
@@ -263,14 +263,14 @@ class XiaohongshuTool(PlatformTool):
                     if not upload_success:
                         raise Exception("没有找到合适的file input")
                     
-                    # 等待文档解析完成
+                    # 等待解析
                     log("等待文档解析（最多30秒）...")
                     for i in range(30):
                         await asyncio.sleep(1)
                         try:
                             title_val = await self.page.locator('[placeholder*="标题"]').first.input_value()
                             if title_val and len(title_val) > 0:
-                                log(f"✓ 解析完成，自动标题: {title_val}")
+                                log(f"✓ 解析完成: {title_val}")
                                 break
                         except:
                             pass
