@@ -231,20 +231,20 @@ class XiaohongshuTool(PlatformTool):
             if file_path:
                 log(f"Step 4: 上传文件 {file_path}...")
                 try:
-                    # 点击上传区域
-                    await self.page.locator(".isFromFileRed").click()
-                    log("✓ 已点击上传区域")
-                    await asyncio.sleep(2)
-                    
-                    # 设置文件
-                    await self.page.locator("body").set_input_files(file_path)
-                    log(f"✓ 已选择文件")
-                    await asyncio.sleep(5)  # 等待上传
+                    # 等待文件输入框出现并上传
+                    file_input = await self.page.wait_for_selector('input[type="file"]', timeout=10000)
+                    await file_input.set_input_files(file_path)
+                    log(f"✓ 已上传文件")
+                    await asyncio.sleep(5)  # 等待上传完成
                     
                 except Exception as e:
                     log(f"文件上传失败: {e}")
-                    # 尝试备用方法
+                    # 尝试点击上传按钮后再找 input
                     try:
+                        await self.page.locator(".isFromFileRed").click()
+                        log("✓ 已点击上传按钮")
+                        await asyncio.sleep(2)
+                        
                         file_input = await self.page.wait_for_selector('input[type="file"]', timeout=5000)
                         await file_input.set_input_files(file_path)
                         log("✓ 使用备用方法上传文件")
@@ -257,7 +257,9 @@ class XiaohongshuTool(PlatformTool):
             if title:
                 log(f"Step 5: 填写标题: {title}")
                 try:
-                    title_input = await self.page.get_by_role("textbox", name="输入标题")
+                    # 等待标题输入框
+                    await self.page.wait_for_selector('[placeholder*="标题"], input[type="text"]', timeout=5000)
+                    title_input = self.page.locator('[placeholder*="标题"]').first
                     await title_input.fill(title)
                     log("✓ 标题填写完成")
                 except Exception as e:
