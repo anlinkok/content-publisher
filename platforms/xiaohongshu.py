@@ -261,10 +261,10 @@ class XiaohongshuTool(PlatformTool):
                 log("未登录，请先运行 login 命令")
                 return ToolResult(success=False, error="未登录")
             
-            log("已登录，进入发布页面...")
-            # 小红书创作者平台 - 选择写长文模式
-            await self.page.goto('https://creator.xiaohongshu.com/creator/note/create', wait_until='domcontentloaded')
-            log("等待页面加载...")
+            log("已登录，进入创作者中心...")
+            # 先访问首页
+            await self.page.goto('https://creator.xiaohongshu.com/new/home', wait_until='domcontentloaded')
+            log("等待首页加载...")
             await asyncio.sleep(5)
             
             # 输出当前页面信息
@@ -277,28 +277,68 @@ class XiaohongshuTool(PlatformTool):
                 await self.close()
                 return ToolResult(success=False, error="未登录")
             
-            # 点击"写长文"选项（如果有的话）
+            # 点击发布按钮（通常在右上角或明显位置）
+            log("查找发布按钮...")
             try:
-                # 查找写长文按钮
-                long_text_selectors = [
-                    'button:has-text("写长文")',
-                    'div:has-text("写长文")',
-                    '[class*="long"]',
-                    '[data-testid*="long"]',
+                publish_entry_selectors = [
+                    'button:has-text("发布")',
+                    'div:has-text("发布")',
+                    '[class*="publish"]',
+                    '[data-testid*="publish"]',
+                    'a[href*="create"]',
+                    'a[href*="publish"]',
                 ]
-                for selector in long_text_selectors:
+                
+                publish_entry = None
+                for selector in publish_entry_selectors:
                     try:
-                        long_text_btn = await self.page.wait_for_selector(selector, timeout=3000)
-                        if long_text_btn:
-                            log(f"找到写长文按钮: {selector}")
-                            await long_text_btn.click()
-                            log("已点击写长文")
-                            await asyncio.sleep(3)
+                        publish_entry = await self.page.wait_for_selector(selector, timeout=3000)
+                        if publish_entry:
+                            log(f"找到发布入口: {selector}")
                             break
                     except:
                         continue
+                
+                if publish_entry:
+                    await publish_entry.click()
+                    log("已点击发布")
+                    await asyncio.sleep(3)
+                else:
+                    # 直接访问创建页面
+                    log("未找到发布按钮，直接访问创建页面")
+                    await self.page.goto('https://creator.xiaohongshu.com/creator/note/create')
+                    await asyncio.sleep(5)
+                    
             except Exception as e:
-                log(f"选择写长文模式失败（可能页面直接进入编辑器）: {e}")
+                log(f"点击发布入口失败: {e}")
+            
+            # 等待页面跳转
+            current_url = self.page.url
+            log(f"点击后URL: {current_url}")
+            
+            # 如果有选择界面，选择"写长文"
+            if 'create' in current_url or 'publish' in current_url:
+                log("进入发布选择页面，尝试选择写长文...")
+                try:
+                    long_text_selectors = [
+                        'button:has-text("写长文")',
+                        'div:has-text("写长文")',
+                        'text="写长文"',
+                        '[class*="long-text"]',
+                    ]
+                    for selector in long_text_selectors:
+                        try:
+                            long_text_btn = await self.page.wait_for_selector(selector, timeout=3000)
+                            if long_text_btn:
+                                log(f"找到写长文按钮: {selector}")
+                                await long_text_btn.click()
+                                log("已选择写长文")
+                                await asyncio.sleep(3)
+                                break
+                        except:
+                            continue
+                except Exception as e:
+                    log(f"选择写长文失败: {e}")
             
             # 小红书发布流程：先上传图片，再填写文字
             # 处理图片上传（小红书必须先有图片）
