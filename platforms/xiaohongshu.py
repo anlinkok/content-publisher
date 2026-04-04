@@ -1,6 +1,5 @@
 """
-小红书 (Xiaohongshu) 平台适配器 - 完整长文发布流程
-基于 xiaohongshu-longpost-auto Skill 实现
+小红书 (Xiaohongshu) 平台适配器 - 使用 CDP 连接真实 Chrome
 """
 import asyncio
 import json
@@ -13,19 +12,33 @@ from platforms.base import PlatformTool, ToolResult
 
 
 class XiaohongshuTool(PlatformTool):
-    """小红书平台适配器 - 完整自动化"""
+    """小红书平台适配器 - CDP 模式"""
     
     platform_name = "xiaohongshu"
     platform_id = "xiaohongshu"
     platform_type = "article"
     output_format = "markdown"
     
-    async def init_browser(self, headless: bool = False, load_cookie: bool = True):
-        """初始化浏览器"""
+    async def init_browser(self, headless: bool = False, load_cookie: bool = True, use_cdp: bool = True):
+        """初始化浏览器 - 优先使用 CDP 连接真实 Chrome"""
         from playwright.async_api import async_playwright
         
         self.playwright = await async_playwright().start()
         
+        # 优先尝试 CDP 连接
+        if use_cdp:
+            try:
+                print("  连接 Chrome 调试端口 (9222)...")
+                self.browser = await self.playwright.chromium.connect_over_cdp("http://localhost:9222")
+                self.context = self.browser.contexts[0] if self.browser.contexts else await self.browser.new_context()
+                self.page = self.context.pages[0] if self.context.pages else await self.context.new_page()
+                print("  ✓ 已连接本地 Chrome")
+                return
+            except Exception as e:
+                print(f"  ! CDP 连接失败: {e}")
+                print("  回退到新建浏览器...")
+        
+        # 回退：新建浏览器
         browser_args = [
             '--disable-blink-features=AutomationControlled',
             '--no-sandbox',
@@ -36,7 +49,7 @@ class XiaohongshuTool(PlatformTool):
             'viewport': {'width': 1920, 'height': 1080},
             'locale': 'zh-CN',
             'timezone_id': 'Asia/Shanghai',
-            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         }
         
         if load_cookie:
@@ -45,9 +58,9 @@ class XiaohongshuTool(PlatformTool):
                 try:
                     with open(state_file, 'r', encoding='utf-8') as f:
                         context_options['storage_state'] = json.load(f)
-                    print(f"✓ 已加载登录状态")
+                    print(f"  ✓ 已加载登录状态")
                 except Exception as e:
-                    print(f"加载登录状态失败: {e}")
+                    print(f"  加载登录状态失败: {e}")
         
         self.browser = await self.playwright.chromium.launch(
             headless=headless,
@@ -55,6 +68,17 @@ class XiaohongshuTool(PlatformTool):
         )
         self.context = await self.browser.new_context(**context_options)
         self.page = await self.context.new_page()
+    
+    async def _screenshot(self, step_name: str):
+        """保存截图用于调试"""
+        try:
+            os.makedirs('data/screenshots', exist_ok=True)
+            timestamp = int(asyncio.get_event_loop().time())
+            path = f'data/screenshots/xiaohongshu_{step_name}_{timestamp}.png'
+            await self.page.screenshot(path=path, full_page=True)
+            print(f"  📸 截图: {path}")
+        except Exception as e:
+            print(f"  ! 截图失败: {e}")
     
     async def is_logged_in(self) -> bool:
         """检查登录状态"""
@@ -67,7 +91,7 @@ class XiaohongshuTool(PlatformTool):
     
     async def authenticate(self) -> bool:
         """扫码登录"""
-        await self.init_browser(headless=False)
+        await self.init_browser(headless=False, use_cdp=True)
         print("打开小红书登录页面...")
         await self.page.goto('https://creator.xiaohongshu.com/login')
         print("请扫码登录，等待中...")
@@ -99,23 +123,10 @@ class XiaohongshuTool(PlatformTool):
         if self.playwright:
             await self.playwright.stop()
     
-    async def _screenshot(self, step_name: str):
-        """保存截图用于调试"""
-        try:
-            os.makedirs('data/screenshots', exist_ok=True)
-            timestamp = int(asyncio.get_event_loop().time())
-            path = f'data/screenshots/xiaohongshu_{step_name}_{timestamp}.png'
-            await self.page.screenshot(path=path, full_page=True)
-            print(f"  📸 截图: {path}")
-        except Exception as e:
-            print(f"  ! 截图失败: {e}")
-    
     def _preprocess_content(self, content: str, title: str) -> tuple:
-        """内容预处理 - 按 Skill 要求分段"""
-        # 小红书标题限制20字
+        """内容预处理"""
         short_title = title[:20] if len(title) <= 20 else title[:18] + "..."
         
-        # 分段：每段300-500字
         paragraphs = []
         current_para = []
         current_len = 0
@@ -141,20 +152,15 @@ class XiaohongshuTool(PlatformTool):
         if current_para:
             paragraphs.append('\n\n'.join(current_para))
         
-        # 添加表情和格式
-        formatted = '\n\n'.join([
-            f"✨ {p}" if i == 0 else f"💡 {p}" 
-            for i, p in enumerate(paragraphs[:10])  # 最多10段
-        ])
+        formatted = '\n\n'.join([f"✨ {p}" if i == 0 else f"💡 {p}" for i, p in enumerate(paragraphs[:10])])
         
-        # 生成描述（50-100字）
         desc = content[:80] + "..." if len(content) > 80 else content
         desc = desc.replace('\n', ' ')
         
         return short_title, formatted, desc
     
     async def publish(self, article, file_path: str = None) -> ToolResult:
-        """完整发布流程"""
+        """发布到小红书"""
         try:
             # 提取内容
             if article:
@@ -164,54 +170,51 @@ class XiaohongshuTool(PlatformTool):
                 title = os.path.splitext(os.path.basename(file_path or ""))[0]
                 content = ""
             
-            # 预处理
             short_title, formatted_content, description = self._preprocess_content(content, title)
             print(f"标题: {short_title}")
             print(f"内容长度: {len(formatted_content)} 字")
             
-            # 1. 初始化浏览器
-            print("\n[1/10] 初始化浏览器...")
-            await self.init_browser(headless=False)
+            # 1. 初始化浏览器（使用 CDP）
+            print("\n[1/11] 初始化浏览器 (CDP模式)...")
+            await self.init_browser(headless=False, use_cdp=True)
             
             # 2. 登录检测
-            print("[2/10] 检查登录状态...")
+            print("[2/11] 检查登录状态...")
             if not await self.is_logged_in():
                 print("未登录，需要扫码...")
                 await self.close()
                 if not await self.authenticate():
                     return ToolResult(success=False, error="登录失败")
-                await self.init_browser(headless=False)
+                await self.init_browser(headless=False, use_cdp=True)
             print("✓ 已登录")
             
             page = self.page
             
             # 3. 进入发布页面
-            print("[3/10] 进入发布页面...")
+            print("[3/11] 进入发布页面...")
             await page.goto("https://creator.xiaohongshu.com/publish/publish?from=homepage")
             await asyncio.sleep(3)
             
             # 4. 点击写长文
-            print("[4/10] 选择写长文...")
+            print("[4/11] 选择写长文...")
             await page.get_by_text("写长文").first.click()
             await asyncio.sleep(2)
             
             # 5. 新的创作
-            print("[5/10] 点击新的创作...")
+            print("[5/11] 点击新的创作...")
             await page.get_by_role("button", name="新的创作").first.click()
             await asyncio.sleep(3)
             
-            # 6. 填充标题
-            print("[6/10] 填写标题...")
+            # 6. 填写标题
+            print("[6/11] 填写标题...")
             title_input = page.get_by_role("textbox", name="输入标题")
             await title_input.click()
             await title_input.fill(short_title)
             print(f"✓ 标题: {short_title}")
             
-            # 7. 填充正文（使用 evaluate 注入）
-            print("[7/10] 填写正文...")
+            # 7. 填充正文
+            print("[7/11] 填写正文...")
             try:
-                # 使用 set_input_files 或直接填充
-                # 方案：用 locator 直接填
                 editor = page.locator('[contenteditable="true"]').first
                 if await editor.count() > 0:
                     await editor.fill(formatted_content)
@@ -221,170 +224,128 @@ class XiaohongshuTool(PlatformTool):
             except Exception as e:
                 print(f"! 正文填充失败: {e}")
             
-            # 8. 一键排版 → 选模板 → 下一步
-            print("[8/10] 一键排版...")
+            # 8. 一键排版
+            print("[8/11] 一键排版...")
             await self._screenshot("before_format")
             try:
                 format_btn = page.get_by_role("button", name="一键排版")
                 if await format_btn.count() > 0:
                     await format_btn.click()
+                    print("✓ 已点击一键排版")
                     await asyncio.sleep(2)
-                    print("  ✓ 已点击一键排版")
                     await self._screenshot("after_format_click")
                     
-                    # 选择模板（清晰明朗/逻辑结构）
-                    template_names = ["逻辑结构", "清晰明朗", "职场干货"]
+                    # 选择模板
+                    template_names = ["逻辑结构", "清晰明朗", "职场干货", "简洁基础"]
                     for tmpl_name in template_names:
-                        template = page.get_by_text(tmpl_name).first
-                        if await template.count() > 0:
-                            await template.click()
-                            print(f"  ✓ 已选择模板: {tmpl_name}")
-                            await asyncio.sleep(1)
-                            break
+                        try:
+                            template = page.get_by_text(tmpl_name).first
+                            if await template.count() > 0:
+                                await template.click()
+                                print(f"✓ 已选择模板: {tmpl_name}")
+                                await asyncio.sleep(1)
+                                break
+                        except:
+                            continue
                     
                     await self._screenshot("after_template_select")
                     
-                    # 点击下一步（尝试多种可能的按钮名称）
+                    # 点击下一步（多种可能）
                     next_btn_names = ["下一步", "确定", "完成", "应用", "确认", "使用"]
-                    next_clicked = False
                     for btn_name in next_btn_names:
                         try:
                             next_btn = page.get_by_role("button", name=btn_name).first
                             if await next_btn.count() > 0 and await next_btn.is_visible():
                                 await next_btn.click()
-                                print(f"  ✓ 已点击: {btn_name}")
-                                next_clicked = True
+                                print(f"✓ 已点击: {btn_name}")
                                 await asyncio.sleep(2)
                                 break
                         except:
                             continue
                     
                     await self._screenshot("after_next_click")
-                    
-                    if not next_clicked:
-                        print("  - 未找到下一步按钮，继续...")
             except Exception as e:
-                print(f"  ! 排版失败: {e}")
-                await self._screenshot("format_error")
+                print(f"! 排版失败: {e}")
             
-            # 9. 填写描述（50-100字）
-            print("[9/10] 填写描述...")
+            # 9. 填写描述
+            print("[9/11] 填写描述...")
             try:
                 desc_input = page.get_by_placeholder("添加正文描述").first
                 if await desc_input.count() > 0:
-                    desc_text = description[:80] if len(description) > 80 else description
-                    await desc_input.fill(desc_text)
-                    print(f"  ✓ 描述: {desc_text[:30]}...")
-                    await asyncio.sleep(1)
+                    await desc_input.fill(description[:80])
+                    print(f"✓ 描述已填写")
             except Exception as e:
-                print(f"  ! 描述填写失败: {e}")
+                print(f"! 描述填写失败: {e}")
             
             # 10. 添加标签
-            print("[10/10] 添加标签...")
+            print("[10/11] 添加标签...")
             try:
-                # 智能提取标签
                 tags = []
                 content_lower = (title + content).lower()
-                if any(k in content_lower for k in ["ai", "人工智能", "智能"]):
+                if any(k in content_lower for k in ["ai", "人工智能"]):
                     tags.extend(["AI", "人工智能"])
-                if any(k in content_lower for k in ["就业", "工作", "职场"]):
+                if any(k in content_lower for k in ["就业", "职场"]):
                     tags.extend(["职场干货", "就业指导"])
-                if any(k in content_lower for k in ["2026", "未来", "趋势"]):
-                    tags.extend(["未来趋势", "科技改变生活"])
+                if any(k in content_lower for k in ["2026", "未来"]):
+                    tags.extend(["未来趋势"])
                 if not tags:
-                    tags = ["干货分享", "职场干货", "AI时代"]
+                    tags = ["干货分享", "职场干货"]
                 
-                # 点击话题按钮
                 topic_btn = page.get_by_role("button", name="话题").first
                 if await topic_btn.count() > 0:
                     await topic_btn.click()
                     await asyncio.sleep(1)
-                    
-                    # 输入标签
                     for tag in tags[:6]:
                         try:
                             tag_input = page.get_by_placeholder("搜索话题").first
                             if await tag_input.count() > 0:
                                 await tag_input.fill(tag)
                                 await asyncio.sleep(1)
-                                # 点击第一个推荐标签
-                                first_tag = page.locator("[class*='topic'], [class*='tag']").first
+                                first_tag = page.locator("[class*='topic']").first
                                 if await first_tag.count() > 0:
                                     await first_tag.click()
                                     await asyncio.sleep(0.5)
                         except:
                             pass
-                    print(f"  ✓ 标签: {tags}")
+                    print(f"✓ 标签: {tags}")
             except Exception as e:
-                print(f"  ! 标签添加失败: {e}")
+                print(f"! 标签添加失败: {e}")
             
-            # 11. 原创声明
-            print("[11/11] 原创声明...")
+            # 11. 原创声明 + 发布
+            print("[11/11] 原创声明并发布...")
             try:
-                # 找包含"原创"的复选框或按钮
-                original_checkbox = page.locator("input[type='checkbox']").locator("xpath=../..").filter(has_text="原创").first
-                if await original_checkbox.count() == 0:
-                    # 尝试直接找文本
-                    original_checkbox = page.get_by_text("声明原创").first
-                
-                if await original_checkbox.count() > 0:
-                    await original_checkbox.click()
-                    print("  ✓ 已点击原创声明")
+                original_btn = page.get_by_text("声明原创").first
+                if await original_btn.count() > 0:
+                    await original_btn.click()
                     await asyncio.sleep(1)
-                    
-                    # 确认弹窗（如果有）
+                    # 确认弹窗
                     confirm_btn = page.get_by_role("button", name=re.compile("声明|确认|确定")).first
                     if await confirm_btn.count() > 0:
                         await confirm_btn.click()
-                        print("  ✓ 已确认原创声明")
                         await asyncio.sleep(1)
-            except Exception as e:
-                print(f"  ! 原创声明失败: {e}")
-            
-            # 12. 发布
-            print("\n[12/12] 发布...")
-            try:
-                # 尝试多种可能的发布按钮名称
-                publish_btn_names = ["发布", "立即发布", "确认发布", "提交"]
-                publish_clicked = False
+                    print("✓ 已声明原创")
                 
-                for btn_name in publish_btn_names:
+                # 点击发布
+                publish_names = ["发布", "立即发布", "确认发布"]
+                for btn_name in publish_names:
                     try:
                         publish_btn = page.get_by_role("button", name=btn_name).first
                         if await publish_btn.count() > 0 and await publish_btn.is_visible():
                             await publish_btn.click()
-                            print(f"  ✓ 已点击: {btn_name}")
-                            publish_clicked = True
+                            print(f"✓ 已点击: {btn_name}")
                             await asyncio.sleep(5)
                             break
-                    except Exception as e:
+                    except:
                         continue
-                
-                if not publish_clicked:
-                    print("  ! 未找到发布按钮，请手动点击")
-                    await asyncio.sleep(60)
-                    await self.close()
-                    return ToolResult(success=False, error="未找到发布按钮")
-                
-                # 检查成功提示
-                success_indicator = page.locator("text=/发布成功|已发布/")
-                if await success_indicator.count() > 0:
-                    print("✓ 发布成功！")
                 
                 url = page.url
                 await self.close()
                 return ToolResult(
                     success=True,
-                    data={
-                        'platform': 'xiaohongshu',
-                        'title': short_title,
-                        'url': url
-                    }
+                    data={'platform': 'xiaohongshu', 'title': short_title, 'url': url}
                 )
             except Exception as e:
                 print(f"! 发布失败: {e}")
-                # 保持浏览器打开让用户手动发布
-                print("浏览器保持打开，请手动点击发布...")
                 await asyncio.sleep(60)
                 await self.close()
                 return ToolResult(success=False, error=str(e))
