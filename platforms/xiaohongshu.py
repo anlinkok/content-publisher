@@ -225,12 +225,25 @@ class XiaohongshuTool(PlatformTool):
                 await self.close()
                 return ToolResult(success=False, error=f"点击新的创作失败: {e}")
             
-            # Step 4: 上传 Word 文件（参考百家号方式）
+            # Step 4: 上传 Word 文件（参考 Codegen 录制）
             if file_path:
                 log(f"Step 4: 上传文件 {file_path}...")
                 upload_success = False
                 try:
-                    # 找所有 file input
+                    # 先点击上传按钮（参考 Codegen）
+                    log("点击上传按钮...")
+                    await self.page.locator(".isFromFileRed").click()
+                    await asyncio.sleep(2)
+                    
+                    # 点击拖拽上传区域
+                    try:
+                        await self.page.locator("div").filter(has_text=re.compile(r"点击或拖拽上传")).first.click()
+                        log("✓ 已点击上传区域")
+                        await asyncio.sleep(2)
+                    except:
+                        pass
+                    
+                    # 现在找 file input
                     file_inputs = await self.page.locator('input[type="file"]').all()
                     log(f"找到 {len(file_inputs)} 个 file input")
                     
@@ -238,7 +251,6 @@ class XiaohongshuTool(PlatformTool):
                         try:
                             accept = await inp.get_attribute('accept') or ''
                             log(f"检查 input, accept={accept}")
-                            # 排除视频，找文档类型
                             if 'video' not in accept.lower():
                                 await inp.set_input_files(file_path)
                                 log("✓ 文件已上传")
