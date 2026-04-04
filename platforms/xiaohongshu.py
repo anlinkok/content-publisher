@@ -59,19 +59,29 @@ class XiaohongshuTool(PlatformTool):
     async def check_auth(self) -> dict:
         """检查登录状态"""
         try:
+            # 先刷新页面确保状态最新
+            await self.page.goto('https://creator.xiaohongshu.com/')
+            await asyncio.sleep(2)
+            
             result = await self.page.evaluate("""
                 async () => {
-                    const res = await fetch('https://creator.xiaohongshu.com/api/galaxy/creator/info', {
-                        method: 'GET',
-                        credentials: 'include',
-                        headers: {
-                            'Origin': 'https://creator.xiaohongshu.com',
-                            'Referer': 'https://creator.xiaohongshu.com/',
-                        }
-                    });
-                    return await res.json();
+                    try {
+                        const res = await fetch('https://creator.xiaohongshu.com/api/galaxy/creator/info', {
+                            method: 'GET',
+                            credentials: 'include',
+                            headers: {
+                                'Origin': 'https://creator.xiaohongshu.com',
+                                'Referer': 'https://creator.xiaohongshu.com/',
+                            }
+                        });
+                        return await res.json();
+                    } catch (e) {
+                        return {error: e.message};
+                    }
                 }
             """)
+            
+            print(f"登录检测响应: {result}")
             
             if result.get('data') and result.get('data', {}).get('user_id'):
                 return {
@@ -80,8 +90,9 @@ class XiaohongshuTool(PlatformTool):
                     'username': result['data'].get('nickname', ''),
                     'avatar': result['data'].get('avatar', ''),
                 }
-            return {'is_authenticated': False}
+            return {'is_authenticated': False, 'response': result}
         except Exception as e:
+            print(f"登录检测出错: {e}")
             return {'is_authenticated': False, 'error': str(e)}
     
     async def is_logged_in(self) -> bool:
@@ -95,17 +106,31 @@ class XiaohongshuTool(PlatformTool):
         
         # 打开登录页
         await self.page.goto('https://creator.xiaohongshu.com/login')
+        print("请在浏览器中扫码或输入账号密码登录...")
         
         # 等待登录成功
         max_wait = 300  # 5分钟
         for i in range(max_wait):
+            # 每30秒刷新页面再检测（避免页面状态不同步）
+            if i % 10 == 0 and i > 0:
+                print(f"已等待 {i} 秒，刷新页面检测登录状态...")
+                await self.page.goto('https://creator.xiaohongshu.com/')
+                await asyncio.sleep(2)
+            
             if await self.is_logged_in():
+                print("检测到登录成功！")
                 # 保存 Cookie
                 await self.save_cookies()
                 await self.close()
                 return True
+            
+            # 每10秒显示一次进度
+            if i % 10 == 0 and i > 0:
+                print(f"等待登录中... ({i}/{max_wait}秒)")
+            
             await asyncio.sleep(1)
         
+        print("登录超时，请重试")
         await self.close()
         return False
     
