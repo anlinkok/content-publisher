@@ -263,7 +263,23 @@ class XiaohongshuTool(PlatformTool):
             
             log("已登录，进入发布页面...")
             await self.page.goto('https://creator.xiaohongshu.com/publish/publish')
-            await asyncio.sleep(3)
+            log("等待页面加载...")
+            await asyncio.sleep(5)
+            
+            # 截图查看页面状态
+            screenshot_path = f'data/xiaohongshu_publish_{int(asyncio.get_event_loop().time())}.png'
+            await self.page.screenshot(path=screenshot_path, full_page=True)
+            log(f"页面截图已保存: {screenshot_path}")
+            
+            # 输出当前页面信息
+            current_url = self.page.url
+            log(f"当前URL: {current_url}")
+            
+            # 检查是否被重定向
+            if 'login' in current_url:
+                log("未登录，被重定向到登录页")
+                await self.close()
+                return ToolResult(success=False, error="未登录")
             
             # 处理封面图片上传
             cover_image = getattr(article, 'cover_image', None)
