@@ -145,9 +145,29 @@ class XiaohongshuTool(PlatformTool):
             return {'is_authenticated': False, 'error': str(e)}
     
     async def is_logged_in(self) -> bool:
-        """检查是否已登录"""
-        result = await self.check_auth()
-        return result.get('is_authenticated', False)
+        """检查是否已登录 - 通过页面跳转检测"""
+        try:
+            # 尝试访问首页
+            await self.page.goto('https://creator.xiaohongshu.com/', wait_until='domcontentloaded')
+            await asyncio.sleep(2)
+            
+            current_url = self.page.url
+            print(f"检测登录状态，当前URL: {current_url}")
+            
+            # 如果被重定向到登录页，说明未登录
+            if 'login' in current_url:
+                print("未登录 - 被重定向到登录页")
+                return False
+            
+            # 如果能正常访问首页，说明已登录
+            if 'creator.xiaohongshu.com' in current_url and 'login' not in current_url:
+                print("已登录 - 成功访问首页")
+                return True
+            
+            return False
+        except Exception as e:
+            print(f"登录检测出错: {e}")
+            return False
     
     async def authenticate(self) -> bool:
         """登录小红书"""
@@ -235,18 +255,15 @@ class XiaohongshuTool(PlatformTool):
         try:
             await self.init_browser()
             
-            # 检查登录 - 小红书cookie过期快，直接尝试发布
+            # 检查登录状态
             log("检查登录状态...")
-            await self.page.goto('https://creator.xiaohongshu.com/publish/publish')
-            await asyncio.sleep(3)
-            
-            # 检查是否被重定向到登录页
-            current_url = self.page.url
-            if 'login' in current_url:
+            if not await self.is_logged_in():
                 log("未登录，请先运行 login 命令")
                 return ToolResult(success=False, error="未登录")
             
-            log("已登录，进入发布页面")
+            log("已登录，进入发布页面...")
+            await self.page.goto('https://creator.xiaohongshu.com/publish/publish')
+            await asyncio.sleep(3)
             
             # 处理封面图片上传
             cover_image = getattr(article, 'cover_image', None)
