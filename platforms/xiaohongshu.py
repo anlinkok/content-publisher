@@ -237,15 +237,10 @@ class XiaohongshuTool(PlatformTool):
             if file_path:
                 log(f"Step 4: 上传文件 {file_path}...")
                 try:
-                    # 先点击上传按钮
-                    await self.page.locator(".isFromFileRed").click()
-                    log("✓ 已点击上传按钮")
-                    await asyncio.sleep(2)
-                    
-                    # 查找文件输入框并上传
-                    file_input = await self.page.wait_for_selector('input[type="file"]', timeout=10000)
+                    # 直接找 input 上传（不点按钮）
+                    file_input = self.page.locator('input[type="file"]').first
                     await file_input.set_input_files(file_path)
-                    log(f"✓ 文件已选择")
+                    log(f"✓ 文件已上传")
                     
                     # 关键：等待解析完成（看标题是否自动填入）
                     log("等待文档解析（最多30秒）...")
