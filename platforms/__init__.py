@@ -6,6 +6,8 @@ from .xiaohongshu import XiaohongshuTool
 from .baijiahao import BaijiahaoTool
 from .wangyi import WangyiTool
 from .qiehao import QiehaoTool
+from .juejin import JuejinTool
+from .csdn import CSDNTool
 
 __all__ = [
     'PlatformTool',
@@ -16,4 +18,6 @@ __all__ = [
     'BaijiahaoTool',
     'WangyiTool',
     'QiehaoTool',
+    'JuejinTool',
+    'CSDNTool',
 ]
